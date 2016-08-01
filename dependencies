@@ -17,5 +17,13 @@ fi
 # pip/conda install python libraries
 # download datasets
 
+if [ ! -e cards ]; then
+    echo 'Downloading cards corpus...'
+    curl -O http://cardscorpus.christopherpotts.net/releases/CardsCorpus-v02.zip
+    unzip CardsCorpus-v02.zip
+    mv CardsCorpus-v02 cards
+    touch cards/__init__.py
+fi
+
 echo 'Installing testing modules (optional)...'
 pip install nose nose-exclude coverage mock
