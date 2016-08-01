@@ -16,7 +16,7 @@ ACTIONS = ['nop',
            'pick',
            'drop0', 'drop1', 'drop2',
            'speak']
-SUITS = list('hdsc')
+SUITS = list('SCHD')
 RANKS = list('A23456789') + ['10'] + list('JQK')
 BOARD_SIZE = (26, 34)
 
@@ -24,11 +24,13 @@ BOARD_SIZE = (26, 34)
 class CardsEnv(gym.Env):
     metadata = {
         'render.modes': ['human', 'rgb_array'],
-        'video.frames_per_second': 30
+        'video.frames_per_second': 60
     }
 
     def __init__(self):
         self.viewer = None
+
+        self.verbosity = 4
 
         # One action for each player
         player = spaces.Discrete(len(ACTIONS))
@@ -39,16 +41,11 @@ class CardsEnv(gym.Env):
         language = spaces.Box(np.array(0.), np.array(1.))
         hand = spaces.Box(np.zeros((3, len(RANKS), len(SUITS))),
                           np.ones((3, len(RANKS), len(SUITS))))
-        floor = spaces.Box(np.zeros((3, len(RANKS), len(SUITS))),
-                           np.ones((3, len(RANKS), len(SUITS))))
+        floor = spaces.Box(np.zeros((len(RANKS), len(SUITS))),
+                           np.ones((len(RANKS), len(SUITS))))
         self.observation_space = spaces.Tuple((board, board, board, hand, floor, language))
 
-        self.walls = np.zeros(BOARD_SIZE)
-        self.p1_loc = (0, 0)
-        self.p2_loc = (0, 0)
-        self.loc_to_cards = defaultdict(list)
-        self.cards_to_loc = [[None for _ in range(len(RANKS))] for _ in range(len(SUITS))]
-
+        self.clear_board()
         self.default_transcript = all_transcripts()[0]
 
         self._seed()
@@ -91,51 +88,76 @@ class CardsEnv(gym.Env):
         p1r, p1c = self.p1_loc
         new_loc = (p1r + dr, p1c + dc)
         if not self._is_in_bounds(new_loc):
-            print('move: OOB')
+            if self.verbosity >= 4:
+                print('move: OOB')
         elif self.walls[new_loc]:
-            print('move: WALL')
+            if self.verbosity >= 4:
+                print('move: WALL')
         else:
             self.p1_loc = new_loc
-            print('move: %s' % (self.p1_loc,))
+            if self.verbosity >= 4:
+                print('move: %s' % (self.p1_loc,))
 
     def _is_in_bounds(self, loc):
         r, c = loc
         return (0 <= r < self.walls.shape[0]) and (0 <= c < self.walls.shape[1])
 
     def _pick(self):
-        print('pick')
+        if self.verbosity >= 4:
+            print('pick')
         pass  # TODO
 
     def _drop(self, slot):
-        print('drop %s' % (slot,))
+        if self.verbosity >= 4:
+            print('drop %s' % (slot,))
         pass  # TODO
 
     def _speak(self):
-        print('speak')
+        if self.verbosity >= 4:
+            print('speak')
         pass  # TODO
 
     def _is_done(self):
-        return False  # TODO
+        done = (0, 0) in self.loc_to_cards[self.p1_loc]
+        if done and self.verbosity >= 2:
+            print('FOUND THE ACE OF SPADES!')
+        return done
 
     def _reset(self):
-        self._get_random_board()
-        if self.viewer and self.viewer.geoms:
-            self.viewer.geoms = []
-        self.last_u = None
+        self._configure(self.default_transcript)
         return self._get_obs()
 
-    def _get_random_board(self):
-        self.walls[:, :] = 1.0
+    def clear_board(self):
+        self.walls = np.ones(BOARD_SIZE)
+        self.p1_loc = (0, 0)
+        self.p2_loc = (0, 0)
+        self.loc_to_cards = defaultdict(list)
+        self.cards_to_loc = defaultdict(lambda: None)
 
-        trans = self.default_transcript
+    def _configure(self, trans, verbosity=None):
+        if verbosity is not None:
+            self.verbosity = verbosity
+        self.clear_board()
+
         for event in trans.iter_events():
             if event.action == cards.ENVIRONMENT:
                 board_info, card_info = event.contents.split('NEW_SECTION')
                 rows = board_info.split(';')[:-1]
                 for r, row in enumerate(rows):
-                    print(row)
+                    if self.verbosity >= 4:
+                        print(row)
                     for c, col in enumerate(row):
-                        self.walls[r, c] = float(col in ('-', 'b'))
+                        self.walls[r, c] = 1. if col == '-' else -1. if col == 'b' else 0.
+                card_locs = card_info.split(';')[:-1]
+                for card_loc in card_locs:
+                    loc_str, card_str = card_loc.split(':')
+                    loc = tuple(int(x) for x in loc_str.split(','))
+                    assert len(loc) == 2, loc
+                    card = (RANKS.index(card_str[:-1]), SUITS.index(card_str[-1]))
+                    self.cards_to_loc[card] = loc
+                    self.loc_to_cards[loc].append(card)
+                    if self.verbosity >= 4:
+                        print('%s: %s' % (loc, card))
             elif event.action == cards.INITIAL_LOCATION:
                 if event.agent == cards.PLAYER1:
                     self.p1_loc = event.parse_contents()
@@ -144,18 +166,31 @@ class CardsEnv(gym.Env):
             else:
                 continue
 
+        if self.viewer and self.viewer.geoms:
+            self.viewer.geoms = []
+
     def _get_obs(self):
+        # Invisible walls (walls = -1.0) are not observed (but still prevent movement)
+        wall_obs = np.maximum(self.walls, 0.0)
         player_obs = np.zeros(self.walls.shape)
         player_obs[self.p1_loc] = 1.0
         language = np.array(0.)  # TODO
-        return (self.walls, self._card_obs(), player_obs,
+        return (wall_obs, self._card_obs(), player_obs,
                 self._hand_obs(), self._floor_obs(), language)
 
     def _card_obs(self):
-        return self.walls  # TODO
+        obs = np.zeros(self.walls.shape)
+        for (r, c), cards_here in self.loc_to_cards.iteritems():
+            if cards_here:
+                obs[r, c] = 1.
+        return obs
 
     def _floor_obs(self):
-        return np.zeros((3, len(RANKS), len(SUITS)))  # TODO
+        cards_here = self.loc_to_cards[self.p1_loc]
+        obs = np.zeros((len(RANKS), len(SUITS)))
+        for rank, suit in cards_here:
+            obs[rank, suit] = 1.
+        return obs
 
     def _hand_obs(self):
         return np.zeros((3, len(RANKS), len(SUITS)))  # TODO
@@ -174,11 +209,13 @@ class CardsEnv(gym.Env):
         if not self.viewer.geoms:
             for r in range(self.walls.shape[0]):
                 for c in range(self.walls.shape[1]):
+                    if (r, c) in self.loc_to_cards:
+                        special = (0, 0) in self.loc_to_cards[(r, c)]
+                        card = make_card(r, c, special=special)
+                        self.viewer.add_geom(card)
+
                     if self.walls[r, c]:
-                        wall = make_wall()
-                        wall_transform = rendering.Transform()
-                        wall_transform.set_translation(c, BOARD_SIZE[0] - r)
-                        wall.add_attr(wall_transform)
+                        wall = make_wall(r, c, invisible=self.walls[r, c] < 0.0)
                         self.viewer.add_geom(wall)
 
             player = make_player()
@@ -197,19 +234,25 @@ class CardsEnv(gym.Env):
         pr, pc = self.p1_loc
         self.player_transform.set_translation(pc, BOARD_SIZE[0] - pr)
 
-        # self.viewer.add_onetime(self.img)
-        # self.pole_transform.set_rotation(self.state[0] + np.pi/2)
-        # if self.last_u:
-        #     self.imgtrans.scale = (-self.last_u/2, np.abs(self.last_u)/2)
-
         return self.viewer.render(return_rgb_array=(mode == 'rgb_array'))
 
 
-def make_wall():
+def make_rect(row, col, cr, cg, cb):
     l, r, t, b = 0, 1, 0, -1
     wall = rendering.make_polygon([(l, b), (l, t), (r, t), (r, b)])
-    wall.set_color(0.0, 0.0, 0.0)
+    wall.set_color(cr, cg, cb)
+    wall_transform = rendering.Transform()
+    wall_transform.set_translation(col, BOARD_SIZE[0] - row)
+    wall.add_attr(wall_transform)
     return wall
+
+
+def make_wall(row, col, invisible=False):
+    return make_rect(row, col, 0., float(invisible), float(invisible))
+
+
+def make_card(row, col, special=False):
+    return make_rect(row, col, 1., 0. if special else 0.75, 0.)
 
 
 def make_player():
@@ -221,10 +264,10 @@ def make_player():
 
 class CardHUD(rendering.Geom):
     def __init__(self):
-        self.card = ('A', 's')
+        self.card = ('A', 'S')
         self._load_imgs()
         self.rank_img = rendering.Image('images/A.png', 1., 1.)
-        self.suit_img = rendering.Image('images/s.png', 1., 1.)
+        self.suit_img = rendering.Image('images/S.png', 1., 1.)
         suit_transform = rendering.Transform(translation=(1., 0.))
         self.suit_img.add_attr(suit_transform)
 
