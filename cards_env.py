@@ -8,6 +8,7 @@ import pyglet
 from gym.envs.classic_control import rendering
 
 from cards import cards
+from cards_cache import all_transcripts
 
 
 ACTIONS = ['nop',
@@ -48,8 +49,7 @@ class CardsEnv(gym.Env):
         self.loc_to_cards = defaultdict(list)
         self.cards_to_loc = [[None for _ in range(len(RANKS))] for _ in range(len(SUITS))]
 
-        corpus = cards.Corpus('cards/transcripts')
-        self.transcripts = list(corpus.iter_transcripts())
+        self.default_transcript = all_transcripts()[0]
 
         self._seed()
 
@@ -127,7 +127,7 @@ class CardsEnv(gym.Env):
     def _get_random_board(self):
         self.walls[:, :] = 1.0
 
-        trans = self.transcripts[np.random.choice(range(len(self.transcripts)))]
+        trans = self.default_transcript
         for event in trans.iter_events():
             if event.action == cards.ENVIRONMENT:
                 board_info, card_info = event.contents.split('NEW_SECTION')
