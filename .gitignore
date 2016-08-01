@@ -5,5 +5,8 @@
 # Local scripts
 activate
 
+# Data files
+cards
+
 # Output directories
 runs/
