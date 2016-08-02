@@ -124,7 +124,7 @@ class CardsEnv(gym.Env):
         return done
 
     def _reset(self):
-        self._configure(self.default_transcript)
+        self._configure(self.default_transcript, verbosity=0)
         return self._get_obs()
 
     def clear_board(self):
@@ -295,12 +295,18 @@ class CardHUD(rendering.Geom):
             self.suit_img.render()
 
 
+_registered = False
+
+
 def register():
-    from gym.envs.registration import register as gym_register
+    global _registered
     name = 'Cards-v0'
-    gym_register(
-        id=name,
-        entry_point='cards_env:CardsEnv',
-        nondeterministic=True,
-    )
+    if not _registered:
+        from gym.envs.registration import register as gym_register
+        gym_register(
+            id=name,
+            entry_point='cards_env:CardsEnv',
+            nondeterministic=True,
+        )
+        _registered = True
     return name
