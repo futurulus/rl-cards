@@ -303,6 +303,7 @@ class OracleLearner(SearcherLearner):
 
     def init_belief(self, env, observation):
         self.ace_loc = env.cards_to_loc[(0, 0)]  # NOT FAIR!
+        self.true_walls = np.abs(env.walls)
         observation = self.remove_other_cards(observation)
         return super(OracleLearner, self).init_belief(env, observation)
 
@@ -312,6 +313,7 @@ class OracleLearner(SearcherLearner):
         cards[self.ace_loc] = 1.
         observation = list(observation)
         observation[1] = cards
+        observation[0] = self.true_walls
         return tuple(observation)
 
     def update_belief(self, env, prev_obs, action, observation, reward, info):
