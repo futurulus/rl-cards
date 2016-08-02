@@ -1,5 +1,5 @@
 # TODO: import all learner models
-from baseline import BaselineLearner
+from baseline import RandomLearner
 
 
 def new(key):
@@ -11,5 +11,5 @@ def new(key):
 
 
 LEARNERS = {
-    'Baseline': BaselineLearner,
+    'Random': RandomLearner,
 }

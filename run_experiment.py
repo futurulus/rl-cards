@@ -12,7 +12,7 @@ import learners
 import datasets
 
 parser = config.get_options_parser()
-parser.add_argument('--learner', default='Baseline', choices=learners.LEARNERS.keys(),
+parser.add_argument('--learner', default='Random', choices=learners.LEARNERS.keys(),
                     help='The name of the model to use in the experiment.')
 parser.add_argument('--load', metavar='MODEL_FILE', default=None,
                     help='If provided, skip training and instead load a pretrained model '
@@ -28,9 +28,9 @@ parser.add_argument('--validation_size', type=int, default=0,
 parser.add_argument('--test_size', type=int, default=None,
                     help='The number of examples to use in testing. '
                          'If None, use the whole dev/test set.')
-parser.add_argument('--data_source', default='foobar_dev', choices=datasets.SOURCES.keys(),
+parser.add_argument('--data_source', default='cards_dev', choices=datasets.SOURCES.keys(),
                     help='The type of data to use.')
-parser.add_argument('--metrics', default=['accuracy', 'perplexity', 'log_likelihood_bits'],
+parser.add_argument('--metrics', default=['reward'],
                     choices=metrics.METRICS.keys(),
                     help='The evaluation metrics to report for the experiment.')
 parser.add_argument('--output_train_data', type=config.boolean, default=False,
@@ -41,6 +41,8 @@ parser.add_argument('--output_test_data', type=config.boolean, default=False,
                          '`test_size`) as a JSON-lines file in the output directory.')
 parser.add_argument('--progress_tick', type=int, default=10,
                     help='The number of seconds between logging progress updates.')
+parser.add_argument('--verbosity', type=int, default=4,
+                    help='The amount of logging output (between 0 and 10, inclusive).')
 
 
 def main():
@@ -73,12 +75,12 @@ def main():
             with open(model_path, 'wb') as outfile:
                 learner.dump(outfile)
 
-        train_results = evaluate.evaluate(learner, train_data, metrics=m, split_id='train',
-                                          write_data=options.output_train_data)
+        train_results = evaluate.evaluate(learner, train_data, metrics=m, split_id='train')
+        #                                 , write_data=options.output_train_data)
         output.output_results(train_results, 'train')
 
-    test_results = evaluate.evaluate(learner, test_data, metrics=m, split_id='eval',
-                                     write_data=options.output_test_data)
+    test_results = evaluate.evaluate(learner, test_data, metrics=m, split_id='eval')
+    #                                , write_data=options.output_test_data)
     output.output_results(test_results, 'eval')
 
 

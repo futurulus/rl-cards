@@ -1,7 +1,8 @@
-from stanza.research.metrics import *
+from stanza.research.metrics import log_likelihood
 
 
-# TODO: define new metrics
+def reward(*args, **kwargs):
+    return log_likelihood(*args, **kwargs)
 
 
 METRICS = {

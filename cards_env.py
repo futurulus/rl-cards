@@ -124,8 +124,7 @@ class CardsEnv(gym.Env):
         return done
 
     def _reset(self):
-        self._configure(self.default_transcript, verbosity=0)
-        return self._get_obs()
+        return self._configure(self.default_transcript, verbosity=0)
 
     def clear_board(self):
         self.walls = np.ones(BOARD_SIZE)
@@ -168,6 +167,8 @@ class CardsEnv(gym.Env):
 
         if self.viewer and self.viewer.geoms:
             self.viewer.geoms = []
+
+        return self._get_obs()
 
     def _get_obs(self):
         # Invisible walls (walls = -1.0) are not observed (but still prevent movement)
