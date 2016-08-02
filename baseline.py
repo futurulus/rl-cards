@@ -289,3 +289,31 @@ def hyphens_to_walls(walls_str):
     return np.array([[1.0 if c == '-' else -1.0 if c == 'b' else 0.0
                       for c in row]
                      for row in walls_str.split(';')])
+
+
+class OracleLearner(SearcherLearner):
+    '''
+    An agent that magically knows where the ace of spades is and tries to cut
+    the quickest path to it. This agent cheats!
+    '''
+    def action(self, env, observation, info, testing=True):
+        observation = self.remove_other_cards(observation)
+        return super(OracleLearner, self).action(env, observation, info,
+                                                 testing=testing)
+
+    def init_belief(self, env, observation):
+        self.ace_loc = env.cards_to_loc[(0, 0)]  # NOT FAIR!
+        observation = self.remove_other_cards(observation)
+        return super(OracleLearner, self).init_belief(env, observation)
+
+    def remove_other_cards(self, observation):
+        cards = observation[1]
+        cards = np.zeros(cards.shape)
+        cards[self.ace_loc] = 1.
+        observation = list(observation)
+        observation[1] = cards
+        return tuple(observation)
+
+    def update_belief(self, env, prev_obs, action, observation, reward, info):
+        return super(OracleLearner, self).update_belief(env, prev_obs, action,
+                                                        observation, reward, info)

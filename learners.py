@@ -1,4 +1,4 @@
-from baseline import RandomLearner, SearcherLearner
+from baseline import RandomLearner, SearcherLearner, OracleLearner
 
 
 def new(key):
@@ -12,4 +12,5 @@ def new(key):
 LEARNERS = {
     'Random': RandomLearner,
     'Searcher': SearcherLearner,
+    'Oracle': OracleLearner,
 }
