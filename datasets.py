@@ -11,9 +11,11 @@ rng = get_rng()
 
 def cards_train():
     num_trans = len(all_transcripts())
-    return [Instance(input=n, output=0)
-            for n in range(num_trans)
-            if n % 10 < 6]
+    insts = [Instance(input=n, output=0)
+             for n in range(num_trans)
+             if n % 10 < 6]
+    rng.shuffle(insts)
+    return insts
 
 
 def cards_dev():
