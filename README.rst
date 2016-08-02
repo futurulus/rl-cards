@@ -1,5 +1,5 @@
 RL on the Cards Corpus
-====================-=
+======================
 
 ``env_display.py``: basic demo using the Cards environment for OpenAI gym
 
