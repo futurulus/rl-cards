@@ -1,6 +1,8 @@
 # Temporary files
 *.pyc
 *~
+.coverage
+coverage_report
 
 # Local scripts
 activate
