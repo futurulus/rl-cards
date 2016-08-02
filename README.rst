@@ -1,21 +1,12 @@
-Stanza project README
-=====================
+RL on the Cards Corpus
+====================-=
 
-This is the default README file for a new project with Stanza.
+``env_display.py``: basic demo using the Cards environment for OpenAI gym
 
-Getting Started
-~~~~~~~~~~~~~~~
+``baseline.py``: simple deterministic agents (don't learn)
 
-You'll want to:
+To run:
 
-* define your first learner (baseline.py); and
-* add functions to load your datasets (datasets.py).
+::
 
-You can also:
-
-* define new metrics, if the ones in stanza.research.metrics aren't adequate (metrics.py); and
-* tweak the method names on the wrapper class for trained models (wrapper.py).
-
-After that, you can start running experiments:
-
-./run_experiment.py --run_dir runs/baseline
+    ./run_experiment.py --learner Searcher --run_dir runs/searcher
