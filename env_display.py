@@ -10,8 +10,6 @@ rng = get_rng()
 if __name__ == '__main__':
     env = gym.make(cards_env.register())
 
-    transcript = 0
-
     for transcript in cards_cache.all_transcripts():
         env.reset()
         new_trans = transcript
