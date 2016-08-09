@@ -30,9 +30,24 @@ def cards_test():
             if n % 10 in (8, 9)]
 
 
+def single_loc_train():
+    insts = cards_train()
+    for inst in insts:
+        inst.input.cards_to_loc = {'AS': (1, 10)}
+    return insts
+
+
+def single_loc_dev():
+    insts = cards_dev()
+    for inst in insts:
+        inst.input.cards_to_loc = {'AS': (1, 10)}
+    return insts
+
+
 DataSource = namedtuple('DataSource', ['train_data', 'test_data'])
 
 SOURCES = {
     'cards_dev': DataSource(cards_train, cards_dev),
     'cards_test': DataSource(cards_train, cards_test),
+    'single_loc': DataSource(single_loc_train, single_loc_dev),
 }
