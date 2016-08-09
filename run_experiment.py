@@ -75,12 +75,12 @@ def main():
             with open(model_path, 'wb') as outfile:
                 learner.dump(outfile)
 
-        train_results = evaluate.evaluate(learner, train_data, metrics=m, split_id='train')
-        #                                 , write_data=options.output_train_data)
+        train_results = evaluate.evaluate(learner, train_data, metrics=m, split_id='train',
+                                          write_data=options.output_train_data)
         output.output_results(train_results, 'train')
 
-    test_results = evaluate.evaluate(learner, test_data, metrics=m, split_id='eval')
-    #                                , write_data=options.output_test_data)
+    test_results = evaluate.evaluate(learner, test_data, metrics=m, split_id='eval',
+                                     write_data=options.output_test_data)
     output.output_results(test_results, 'eval')
 
 

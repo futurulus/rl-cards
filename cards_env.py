@@ -7,7 +7,6 @@ from os import path
 import pyglet
 from gym.envs.classic_control import rendering
 
-from cards import cards
 from cards_cache import all_transcripts
 
 
@@ -18,7 +17,7 @@ ACTIONS = ['nop',
            'speak']
 SUITS = list('SCHD')
 RANKS = list('A23456789') + ['10'] + list('JQK')
-BOARD_SIZE = (26, 34)
+MAX_BOARD_SIZE = (26, 34)
 
 
 class CardsEnv(gym.Env):
@@ -36,7 +35,7 @@ class CardsEnv(gym.Env):
         player = spaces.Discrete(len(ACTIONS))
         self.action_space = player  # should this be spaces.Tuple((player, player)) for 2 players?
         # One board for walls, one for card observations, one for player location
-        board = spaces.Box(np.zeros(BOARD_SIZE), np.ones(BOARD_SIZE))
+        board = spaces.Box(np.zeros(MAX_BOARD_SIZE), np.ones(MAX_BOARD_SIZE))
         # TODO: represent language in observations
         language = spaces.Box(np.array(0.), np.array(1.))
         hand = spaces.Box(np.zeros((3, len(RANKS), len(SUITS))),
@@ -46,7 +45,8 @@ class CardsEnv(gym.Env):
         self.observation_space = spaces.Tuple((board, board, board, hand, floor, language))
 
         self.clear_board()
-        self.default_transcript = all_transcripts()[0]
+        import world
+        self.default_world = world.CardsWorld(all_transcripts()[0])
 
         self._seed()
 
@@ -124,46 +124,28 @@ class CardsEnv(gym.Env):
         return done
 
     def _reset(self):
-        return self._configure(self.default_transcript, verbosity=0)
+        return self._configure(self.default_world, verbosity=0)
 
     def clear_board(self):
-        self.walls = np.ones(BOARD_SIZE)
+        self.walls = np.ones(MAX_BOARD_SIZE)
         self.p1_loc = (0, 0)
         self.p2_loc = (0, 0)
         self.loc_to_cards = defaultdict(list)
         self.cards_to_loc = defaultdict(lambda: None)
 
-    def _configure(self, trans, verbosity=None):
+    def _configure(self, world, verbosity=None):
         if verbosity is not None:
             self.verbosity = verbosity
         self.clear_board()
 
-        for event in trans.iter_events():
-            if event.action == cards.ENVIRONMENT:
-                board_info, card_info = event.contents.split('NEW_SECTION')
-                rows = board_info.split(';')[:-1]
-                for r, row in enumerate(rows):
-                    if self.verbosity >= 4:
-                        print(row)
-                    for c, col in enumerate(row):
-                        self.walls[r, c] = 1. if col == '-' else -1. if col == 'b' else 0.
-                card_locs = card_info.split(';')[:-1]
-                for card_loc in card_locs:
-                    loc_str, card_str = card_loc.split(':')
-                    loc = tuple(int(x) for x in loc_str.split(','))
-                    assert len(loc) == 2, loc
-                    card = (RANKS.index(card_str[:-1]), SUITS.index(card_str[-1]))
-                    self.cards_to_loc[card] = loc
-                    self.loc_to_cards[loc].append(card)
-                    if self.verbosity >= 4:
-                        print('%s: %s' % (loc, card))
-            elif event.action == cards.INITIAL_LOCATION:
-                if event.agent == cards.PLAYER1:
-                    self.p1_loc = event.parse_contents()
-                else:
-                    self.p2_loc = event.parse_contents()
-            else:
-                continue
+        self.walls = np.copy(world.walls)
+        for card, loc in world.cards_to_loc.iteritems():
+            card = (RANKS.index(card[:-1]), SUITS.index(card[-1]))
+            self.cards_to_loc[card] = loc
+            self.loc_to_cards[loc].append(card)
+
+        self.p1_loc = world.p1_loc
+        self.p2_loc = world.p2_loc
 
         if self.viewer and self.viewer.geoms:
             self.viewer.geoms = []
@@ -205,7 +187,7 @@ class CardsEnv(gym.Env):
 
         if self.viewer is None:
             self.viewer = rendering.Viewer(500, 500)
-            self.viewer.set_bounds(0, BOARD_SIZE[1], 0, BOARD_SIZE[0] + 2)
+            self.viewer.set_bounds(0, MAX_BOARD_SIZE[1], 0, MAX_BOARD_SIZE[0] + 2)
 
         if not self.viewer.geoms:
             for r in range(self.walls.shape[0]):
@@ -225,7 +207,7 @@ class CardsEnv(gym.Env):
             self.viewer.add_geom(player)
 
             self.floor_hud = CardHUD()
-            self.floor_hud.add_attr(rendering.Transform(translation=(1.0, BOARD_SIZE[0] + 1.0)))
+            self.floor_hud.add_attr(rendering.Transform(translation=(1.0, MAX_BOARD_SIZE[0] + 1.0)))
             self.viewer.add_geom(self.floor_hud)
             # fname = path.join(path.dirname(__file__), "assets/clockwise.png")
             # self.img = rendering.Image(fname, 1., 1.)
@@ -233,7 +215,7 @@ class CardsEnv(gym.Env):
             # self.img.add_attr(self.imgtrans)
 
         pr, pc = self.p1_loc
-        self.player_transform.set_translation(pc, BOARD_SIZE[0] - pr)
+        self.player_transform.set_translation(pc, MAX_BOARD_SIZE[0] - pr)
 
         return self.viewer.render(return_rgb_array=(mode == 'rgb_array'))
 
@@ -243,7 +225,7 @@ def make_rect(row, col, cr, cg, cb):
     wall = rendering.make_polygon([(l, b), (l, t), (r, t), (r, b)])
     wall.set_color(cr, cg, cb)
     wall_transform = rendering.Transform()
-    wall_transform.set_translation(col, BOARD_SIZE[0] - row)
+    wall_transform.set_translation(col, MAX_BOARD_SIZE[0] - row)
     wall.add_attr(wall_transform)
     return wall
 

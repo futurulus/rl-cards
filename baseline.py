@@ -9,7 +9,6 @@ from stanza.research import config
 from stanza.research.learner import Learner
 
 import cards_env
-from cards_cache import all_transcripts
 
 parser = config.get_options_parser()
 parser.add_argument('--max_steps', type=int, default=1000,
@@ -47,9 +46,8 @@ class CardsLearner(Learner):
 
             total_reward = 0.
 
-            trans = all_transcripts()[inst.input]
             env.reset()
-            observation = env.configure(trans, verbosity=verbosity)
+            observation = env.configure(inst.input, verbosity=verbosity)
             info = None
             self.init_belief(env, observation)
             for step in range(self.options.max_steps):
