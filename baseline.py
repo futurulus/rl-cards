@@ -23,6 +23,7 @@ class CardsLearner(Learner):
 
     def train(self, training_instances, validation_instances='ignored', metrics='ignored'):
         pass
+        raise NotImplementedError
 
     @property
     def num_params(self):
@@ -90,6 +91,9 @@ class RandomLearner(CardsLearner):
     '''
     An agent that simply takes random actions, and does not learn.
     '''
+    def train(self, training_instances, validation_instances='ignored', metrics='ignored'):
+        pass
+
     @property
     def num_params(self):
         return 0
@@ -110,6 +114,9 @@ class SearcherLearner(CardsLearner):
     if all squares have been explored and the game doesn't end, the agent then
     takes random actions.
     '''
+    def train(self, training_instances, validation_instances='ignored', metrics='ignored'):
+        pass
+
     @property
     def num_params(self):
         return 0
