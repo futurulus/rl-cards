@@ -8,7 +8,7 @@ from stanza.research.rng import get_rng
 
 import cards_env
 from baseline import CardsLearner
-from tfutils import minimize_with_grad_clip  # , gpu_session
+from tfutils import minimize_with_grad_clip, moments  # , gpu_session
 
 rng = get_rng()
 
@@ -17,10 +17,18 @@ parser.add_argument('--pg_hidden_size', type=int, default=200,
                     help='The size of the neural network hidden layer for the Karpathy PG learner.')
 parser.add_argument('--pg_batch_size', type=int, default=10,
                     help='The number of games to play in a batch between parameter updates.')
-parser.add_argument('--pg_random_epsilon', type=int, default=0.1,
+parser.add_argument('--pg_random_epsilon', type=float, default=0.1,
                     help='The probability of taking a uniform random action during training.')
-parser.add_argument('--pg_grad_clip', type=int, default=5.0,
-                    help='The maximum norm of a tensor gradient in ')
+parser.add_argument('--pg_grad_clip', type=float, default=5.0,
+                    help='The maximum norm of a tensor gradient in training.')
+parser.add_argument('--monitor_params', type=config.boolean, default=True,
+                    help='If True, log histograms of parameters to Tensorboard.')
+parser.add_argument('--monitor_grads', type=config.boolean, default=True,
+                    help='If True, log histograms of gradients to Tensorboard.')
+parser.add_argument('--monitor_activations', type=config.boolean, default=True,
+                    help='If True, log histograms of gradients to Tensorboard.')
+parser.add_argument('--detect_nans', type=config.boolean, default=True,
+                    help='If True, error when a NaN is detected.')
 
 
 class KarpathyPGLearner(CardsLearner):
@@ -40,10 +48,14 @@ class KarpathyPGLearner(CardsLearner):
             if self.options.verbosity >= 1:
                 progress.start_task('Batch', num_batches)
 
-            for batch_num, batch in enumerate(batches):
-                if self.options.verbosity >= 1:
-                    progress.progress(batch_num)
-                self.train_one_batch(list(batch), env)
+            try:
+                for batch_num, batch in enumerate(batches):
+                    if self.options.verbosity >= 1:
+                        progress.progress(batch_num)
+                    self.train_one_batch(list(batch), env, step=batch_num)
+            except KeyboardInterrupt:
+                self.summary_writer.flush()
+                raise
 
             if self.options.verbosity >= 1:
                 progress.end_task()
@@ -65,36 +77,50 @@ class KarpathyPGLearner(CardsLearner):
                          for t in (walls, cards, player)]
             combined_input = tf.concat(1, flattened, name='combined_input')
 
-            hidden1 = tf.contrib.layers.fully_connected(combined_input, trainable=True,
-                                                        num_outputs=self.options.pg_hidden_size)
-            self.output = tf.contrib.layers.fully_connected(hidden1, trainable=True,
-                                                            num_outputs=len(cards_env.ACTIONS))
+            fc = tf.contrib.layers.fully_connected
+            hidden1 = fc(combined_input, trainable=True, num_outputs=self.options.pg_hidden_size)
+            self.output = fc(hidden1, trainable=True, num_outputs=len(cards_env.ACTIONS))
 
             action = tf.placeholder(tf.int32, shape=(None,), name='action')
             reward = tf.placeholder(tf.float32, shape=(None,), name='reward')
             self.label_vars = [action, reward]
 
-            reward_mean = tf.reduce_mean(reward, name='reward_mean')
-            reward_variance = tf.reduce_mean(reward, name='reward_variance')
+            reward_mean, reward_variance = moments(reward)
             normalized = tf.nn.batch_normalization(reward, reward_mean, reward_variance,
-                                                   scale=1.0, offset=0.0, variance_epsilon=1e-7)
+                                                   scale=1.0, offset=0.0, variance_epsilon=1e-4)
             opt = tf.train.RMSPropOptimizer(learning_rate=0.1)
             logp = tf.nn.sparse_softmax_cross_entropy_with_logits(self.output, action,
                                                                   name='action_log_prob')
             dlogp = 1 - tf.exp(logp)
             loss = tf.reduce_mean(dlogp * normalized)
+            tf.scalar_summary('loss', loss)
             var_list = tf.trainable_variables()
             print('Trainable variables:')
             for var in var_list:
                 print(var.name)
             self.train_update = minimize_with_grad_clip(opt, self.options.pg_grad_clip,
                                                         loss, var_list=var_list)
+            self.summary_op = self.get_merged_summary_op()
+            self.summary_writer = tf.train.SummaryWriter(self.options.run_dir, self.graph)
+            self.check_op = tf.add_check_numerics_ops()
+
+    def get_merged_summary_op(self):
+        if self.options.monitor_params:
+            for var in tf.all_variables():
+                if var.name:
+                    tf.histogram_summary('param/' + var.name, var)
+        '''
+        if self.options.monitor_activations:
+            for op in self.graph.get_operations():
+                if op.name:
+                    tf.histogram_summary('activation/' + op.name, op)
+        '''
+        return tf.merge_all_summaries()
 
     def init_params(self):
         tf.initialize_all_variables().run()
-        self.print_stuff = False
 
-    def train_one_batch(self, insts, env):
+    def train_one_batch(self, insts, env, step):
         inputs = []
         actions = []
         rewards = []
@@ -132,8 +158,12 @@ class KarpathyPGLearner(CardsLearner):
         feed_dict = self.batch_inputs(inputs)
         for label, value in zip(self.label_vars, [np.array(actions), np.array(rewards)]):
             feed_dict[label] = value
-        self.session.run([self.train_update], feed_dict=feed_dict)
-        self.print_stuff = True
+        ops = [self.train_update, self.summary_op]
+        if self.options.detect_nans:
+            ops.append(self.check_op)
+        results = self.session.run(ops, feed_dict=feed_dict)
+        summary = results[1]
+        self.summary_writer.add_summary(summary, step)
 
     @property
     def num_params(self):
@@ -144,7 +174,7 @@ class KarpathyPGLearner(CardsLearner):
         feed_dict = self.batch_inputs([inputs])
         dist = self.session.run(self.output, feed_dict=feed_dict)
         random_epsilon = 0.0 if testing else self.options.pg_random_epsilon
-        action = sample(dist, random_epsilon=random_epsilon, verbose=self.print_stuff)[0]
+        action = sample(dist, random_epsilon=random_epsilon)[0]
         self.actions.append(action)
         return action
 
