@@ -8,7 +8,8 @@ from stanza.research.rng import get_rng
 
 import cards_env
 from baseline import CardsLearner
-from tfutils import minimize_with_grad_clip, moments  # , gpu_session
+import tfutils
+from tfutils import minimize_with_grad_clip
 
 rng = get_rng()
 
@@ -85,7 +86,7 @@ class KarpathyPGLearner(CardsLearner):
             reward = tf.placeholder(tf.float32, shape=(None,), name='reward')
             self.label_vars = [action, reward]
 
-            reward_mean, reward_variance = moments(reward)
+            reward_mean, reward_variance = tfutils.moments(reward)
             normalized = tf.nn.batch_normalization(reward, reward_mean, reward_variance,
                                                    scale=1.0, offset=0.0, variance_epsilon=1e-4)
             opt = tf.train.RMSPropOptimizer(learning_rate=0.1)
@@ -100,22 +101,11 @@ class KarpathyPGLearner(CardsLearner):
                 print(var.name)
             self.train_update = minimize_with_grad_clip(opt, self.options.pg_grad_clip,
                                                         loss, var_list=var_list)
-            self.summary_op = self.get_merged_summary_op()
-            self.summary_writer = tf.train.SummaryWriter(self.options.run_dir, self.graph)
             self.check_op = tf.add_check_numerics_ops()
-
-    def get_merged_summary_op(self):
-        if self.options.monitor_params:
-            for var in tf.all_variables():
-                if var.name:
-                    tf.histogram_summary('param/' + var.name, var)
-        '''
-        if self.options.monitor_activations:
-            for op in self.graph.get_operations():
-                if op.name:
-                    tf.histogram_summary('activation/' + op.name, op)
-        '''
-        return tf.merge_all_summaries()
+            if self.options.monitor_activations:
+                tfutils.add_summary_ops()
+            self.summary_op = tf.merge_all_summaries()
+            self.summary_writer = tf.train.SummaryWriter(self.options.run_dir, self.graph)
 
     def init_params(self):
         tf.initialize_all_variables().run()

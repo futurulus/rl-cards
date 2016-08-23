@@ -25,3 +25,37 @@ def moments(x):
         mean = tf.reduce_mean(x)
         shifted = x - mean
         return mean, tf.nn.relu(tf.reduce_mean(shifted ** 2))
+
+
+def add_summary_ops():
+    '''
+    Connect a `histogram_summary` or `scalar_summary` to every floating point
+    tensor. `scalar_summary` operations are added for each scalar `half`, `float`,
+    or `double` tensor in the graph, and `histogram_summary` operations for each
+    tensor with rank at least 1.
+
+    For all ops in the graph, the `scalar_summary` op for all of its (`half`,
+    `float`, or `double`) inputs is guaranteed to run before the `scalar_summary`
+    op on any of its outputs.
+
+    Based on `tf.add_check_numerics_ops`.
+
+    Returns:
+    A `group` op depending on all `scalar_summary` ops added.
+    '''
+    summary_op = []
+    # This code relies on the ordering of ops in get_operations().
+    # The producer of a tensor always comes before that tensor's consumer in
+    # this list. This is true because get_operations() returns ops in the order
+    # added, and an op can only be added after its inputs are added.
+    for op in tf.get_default_graph().get_operations():
+        for output in op.outputs:
+            if output.dtype in [tf.float16, tf.float32, tf.float64]:
+                if output.get_shape().ndims == 0:
+                    summ_type = tf.scalar_summary
+                else:
+                    summ_type = tf.histogram_summary
+                message = 'activation/' + op.name + ":" + str(output.value_index)
+                with tf.control_dependencies(summary_op):
+                    summary_op = [summ_type(message, output)]
+    return tf.group(*summary_op)
