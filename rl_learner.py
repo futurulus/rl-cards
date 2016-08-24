@@ -53,7 +53,7 @@ class KarpathyPGLearner(CardsLearner):
                 for batch_num, batch in enumerate(batches):
                     if self.options.verbosity >= 1:
                         progress.progress(batch_num)
-                    self.train_one_batch(list(batch), env, step=batch_num)
+                    self.train_one_batch(list(batch), env, t=batch_num)
             except KeyboardInterrupt:
                 self.summary_writer.flush()
                 raise
@@ -110,7 +110,7 @@ class KarpathyPGLearner(CardsLearner):
     def init_params(self):
         tf.initialize_all_variables().run()
 
-    def train_one_batch(self, insts, env, step):
+    def train_one_batch(self, insts, env, t):
         inputs = []
         actions = []
         rewards = []
@@ -153,7 +153,8 @@ class KarpathyPGLearner(CardsLearner):
             ops.append(self.check_op)
         results = self.session.run(ops, feed_dict=feed_dict)
         summary = results[1]
-        self.summary_writer.add_summary(summary, step)
+        self.summary_writer.add_summary(summary, t)
+        print('Adding summary: {}'.format(t))
 
     @property
     def num_params(self):
