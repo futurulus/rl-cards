@@ -5,7 +5,12 @@ from gym.utils import seeding
 import numpy as np
 from os import path
 import pyglet
-from gym.envs.classic_control import rendering
+try:
+    from gym.envs.classic_control import rendering
+    Geom = rendering.Geom
+except pyglet.canvas.xlib.NoSuchDisplayException:
+    Geom = object
+
 
 from cards_cache import all_transcripts
 
@@ -245,7 +250,7 @@ def make_player():
     return player
 
 
-class CardHUD(rendering.Geom):
+class CardHUD(Geom):
     def __init__(self):
         self.card = ('A', 'S')
         self._load_imgs()
