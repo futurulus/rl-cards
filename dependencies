@@ -13,9 +13,7 @@ if [ ! -e tensorflow ]; then
     )
 fi
 
-# TODO:
-# pip/conda install python libraries
-# download datasets
+pip install gym
 
 if [ ! -e cards ]; then
     echo 'Downloading cards corpus...'
