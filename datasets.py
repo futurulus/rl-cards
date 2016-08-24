@@ -3,7 +3,7 @@ from collections import namedtuple
 from stanza.research.instance import Instance
 from stanza.research.rng import get_rng
 
-from world import CardsWorld
+from world import CardsWorld, build_world
 from cards_cache import all_transcripts
 
 
@@ -44,10 +44,21 @@ def single_loc_dev():
     return insts
 
 
+def just_go_down():
+    walls = [[1., 1., 1.],
+             [1., 0., 1.],
+             [1., 0., 1.],
+             [1., 1., 1.]]
+    cards_to_loc = {'AS': (2, 1)}
+    return [Instance(input=build_world(walls, cards_to_loc), output=0)
+            for _ in range(500)]
+
+
 DataSource = namedtuple('DataSource', ['train_data', 'test_data'])
 
 SOURCES = {
     'cards_dev': DataSource(cards_train, cards_dev),
     'cards_test': DataSource(cards_train, cards_test),
     'single_loc': DataSource(single_loc_train, single_loc_dev),
+    'just_go_down': DataSource(just_go_down, just_go_down),
 }

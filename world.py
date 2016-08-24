@@ -39,3 +39,19 @@ class CardsWorld(object):
                     self.p2_loc = event.parse_contents()
             else:
                 continue
+
+
+class MockTranscript(object):
+    def iter_events(self):
+        return []
+
+
+def build_world(walls, cards_to_loc, p1_loc=(1, 1), p2_loc=(1, 1), verbosity=0):
+    world = CardsWorld(MockTranscript())
+    for i, row in enumerate(walls):
+        for j, val in enumerate(row):
+            world.walls[i][j] = val
+    world.cards_to_loc = cards_to_loc
+    world.p1_loc = p1_loc
+    world.p2_loc = p2_loc
+    return world
