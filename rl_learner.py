@@ -37,33 +37,36 @@ class KarpathyPGLearner(CardsLearner):
         self.build_graph()
         env = gym.make(cards_env.register())
 
-        # with gpu_session(self.graph) as sess:
-        with tf.Session(graph=self.graph) as sess:
-            self.session = sess
-            self.init_params()
+        # gpu_session(self.graph)
+        self.session = tf.Session(graph=self.graph)
+        self.init_params()
 
-            batches = iterators.iter_batches(training_instances,
-                                             self.options.pg_batch_size)
-            num_batches = (len(training_instances) - 1) // self.options.pg_batch_size + 1
+        batches = iterators.iter_batches(training_instances,
+                                         self.options.pg_batch_size)
+        num_batches = (len(training_instances) - 1) // self.options.pg_batch_size + 1
 
-            if self.options.verbosity >= 1:
-                progress.start_task('Batch', num_batches)
+        if self.options.verbosity >= 1:
+            progress.start_task('Batch', num_batches)
 
-            try:
-                for batch_num, batch in enumerate(batches):
-                    if self.options.verbosity >= 1:
-                        progress.progress(batch_num)
-                    self.train_one_batch(list(batch), env, t=batch_num)
-            except KeyboardInterrupt:
-                self.summary_writer.flush()
-                raise
+        try:
+            for batch_num, batch in enumerate(batches):
+                if self.options.verbosity >= 1:
+                    progress.progress(batch_num)
+                self.train_one_batch(list(batch), env, t=batch_num)
+                if batch_num % 10 == 0:
+                    check_prefix = config.get_file_path('checkpoint')
+                    self.saver.save(self.session, check_prefix, global_step=batch_num)
+        except KeyboardInterrupt:
+            self.summary_writer.flush()
+            raise
 
-            if self.options.verbosity >= 1:
-                progress.end_task()
-
-            self.session = None
+        if self.options.verbosity >= 1:
+            progress.end_task()
 
     def build_graph(self):
+        if hasattr(self, 'graph'):
+            return
+
         self.graph = tf.Graph()
         with self.graph.as_default():
             walls = tf.placeholder(tf.float32, shape=(None,) + cards_env.MAX_BOARD_SIZE,
@@ -106,9 +109,11 @@ class KarpathyPGLearner(CardsLearner):
                 tfutils.add_summary_ops()
             self.summary_op = tf.merge_all_summaries()
             self.summary_writer = tf.train.SummaryWriter(self.options.run_dir, self.graph)
+            self.saver = tf.train.Saver()
 
     def init_params(self):
-        tf.initialize_all_variables().run()
+        with self.graph.as_default():
+            tf.initialize_all_variables().run(session=self.session)
 
     def train_one_batch(self, insts, env, t):
         inputs = []
@@ -187,6 +192,22 @@ class KarpathyPGLearner(CardsLearner):
     def update_belief(self, env, prev_obs, action, observation, reward, info):
         self.rewards.append(reward)
         self.inputs.append(self.preprocess(observation))
+
+    def dump(self, prefix):
+        '''
+        :param outfile: The *path prefix* (a string, not a file-like object!)
+                        of the model file to be written
+        '''
+        self.build_graph()
+        self.saver.save(self.session, prefix, global_step=0)
+
+    def load(self, filename):
+        '''
+        :param outfile: The *path* (a string, not a file-like object!)
+                        of the model file to be read
+        '''
+        self.build_graph()
+        self.saver.restore(self.session, filename)
 
 
 def sample(a, temperature=1.0, random_epsilon=0.0, verbose=False):

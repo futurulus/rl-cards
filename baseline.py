@@ -86,6 +86,22 @@ class CardsLearner(Learner):
             options = config.options()
             self.options = argparse.Namespace(**options.__dict__)
 
+    def dump(self, prefix):
+        '''
+        :param prefix: The *path prefix* (a string, not a file-like object!)
+                       of the model file to be written ('.pkl' will be added)
+        '''
+        with open(prefix + '.pkl', 'wb') as outfile:
+            super(CardsLearner, self).dump(outfile)
+
+    def load(self, filename):
+        '''
+        :param filename: The *path* (a string, not a file-like object!)
+                         of the model file to be read
+        '''
+        with open(filename, 'rb') as infile:
+            super(CardsLearner, self).load(infile)
+
 
 class RandomLearner(CardsLearner):
     '''

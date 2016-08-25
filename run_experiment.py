@@ -66,14 +66,12 @@ def main():
     m = [metrics.METRICS[m] for m in options.metrics]
 
     if options.load:
-        with open(options.load, 'rb') as infile:
-            learner.load(infile)
+        learner.load(options.load)
     else:
         learner.train(train_data, validation_data, metrics=m)
-        model_path = config.get_file_path('model.pkl')
+        model_path = config.get_file_path('model')
         if model_path:
-            with open(model_path, 'wb') as outfile:
-                learner.dump(outfile)
+            learner.dump(model_path)
 
         train_results = evaluate.evaluate(learner, train_data, metrics=m, split_id='train',
                                           write_data=options.output_train_data)
