@@ -90,8 +90,8 @@ class KarpathyPGLearner(CardsLearner):
             normalized = tf.nn.batch_normalization(reward, reward_mean, reward_variance,
                                                    scale=1.0, offset=0.0, variance_epsilon=1e-4)
             opt = tf.train.RMSPropOptimizer(learning_rate=0.1)
-            logp = tf.nn.sparse_softmax_cross_entropy_with_logits(self.output, action,
-                                                                  name='action_log_prob')
+            logp = -tf.nn.sparse_softmax_cross_entropy_with_logits(self.output, action,
+                                                                   name='action_log_prob')
             dlogp = 1 - tf.exp(logp)
             loss = tf.reduce_mean(dlogp * normalized)
             tf.scalar_summary('loss', loss)
