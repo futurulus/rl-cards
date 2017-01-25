@@ -83,7 +83,8 @@ class KarpathyPGLearner(CardsLearner):
 
             fc = tf.contrib.layers.fully_connected
             hidden1 = fc(combined_input, trainable=True, num_outputs=self.options.pg_hidden_size)
-            self.output = fc(hidden1, trainable=True, num_outputs=len(cards_env.ACTIONS))
+            self.output = fc(hidden1, trainable=True, activation_fn=tf.identity,
+                             num_outputs=len(cards_env.ACTIONS))
 
             action = tf.placeholder(tf.int32, shape=(None,), name='action')
             reward = tf.placeholder(tf.float32, shape=(None,), name='reward')
