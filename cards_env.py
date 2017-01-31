@@ -138,9 +138,13 @@ class CardsEnv(gym.Env):
         self.loc_to_cards = defaultdict(list)
         self.cards_to_loc = defaultdict(lambda: None)
 
-    def _configure(self, world, verbosity=None):
+    def _configure(self, world=None, verbosity=None):
         if verbosity is not None:
             self.verbosity = verbosity
+
+        if world is None:
+            world = self.default_world
+
         self.clear_board()
 
         self.walls = np.copy(world.walls)

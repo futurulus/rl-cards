@@ -47,8 +47,8 @@ class CardsLearner(Learner):
 
             total_reward = 0.
 
-            env.reset()
-            observation = env.configure(inst.input, verbosity=verbosity)
+            env.configure(inst.input, verbosity=verbosity)
+            observation = env._get_obs()
             info = None
             self.init_belief(env, observation)
             for step in range(self.options.max_steps):

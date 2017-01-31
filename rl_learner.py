@@ -10,6 +10,7 @@ import cards_env
 from baseline import CardsLearner
 import tfutils
 from tfutils import minimize_with_grad_clip
+from helpers import profile
 
 rng = get_rng()
 
@@ -33,6 +34,7 @@ parser.add_argument('--detect_nans', type=config.boolean, default=True,
 
 
 class KarpathyPGLearner(CardsLearner):
+    @profile
     def train(self, training_instances, validation_instances='ignored', metrics='ignored'):
         self.build_graph()
         env = gym.make(cards_env.register())
@@ -111,11 +113,13 @@ class KarpathyPGLearner(CardsLearner):
             self.summary_op = tf.merge_all_summaries()
             self.summary_writer = tf.train.SummaryWriter(self.options.run_dir, self.graph)
             self.saver = tf.train.Saver()
+            self.run_metadata = tf.RunMetadata()
 
     def init_params(self):
         with self.graph.as_default():
             tf.initialize_all_variables().run(session=self.session)
 
+    @profile
     def train_one_batch(self, insts, env, t):
         inputs = []
         actions = []
@@ -127,8 +131,8 @@ class KarpathyPGLearner(CardsLearner):
         for i, inst in enumerate(insts):
             if self.options.verbosity >= 1:
                 progress.progress(i)
-            env.reset()
-            observation = env.configure(inst.input, verbosity=self.options.verbosity)
+            env.configure(inst.input, verbosity=self.options.verbosity)
+            observation = env._get_obs()
             info = None
             self.init_belief(env, observation)
 
@@ -141,6 +145,12 @@ class KarpathyPGLearner(CardsLearner):
                 self.update_belief(env, prev_obs, action, observation, reward, info)
                 if done:
                     break
+
+            from tensorflow.python.client import timeline
+            trace = timeline.Timeline(step_stats=self.run_metadata.step_stats)
+
+            with config.open('timeline.ctf.json', 'w') as trace_file:
+                trace_file.write(trace.generate_chrome_trace_format())
 
             inputs.extend(self.inputs[:-1])
             actions.extend(self.actions)
@@ -169,7 +179,9 @@ class KarpathyPGLearner(CardsLearner):
     def action(self, env, observation, info, testing=True):
         inputs = self.preprocess(observation)
         feed_dict = self.batch_inputs([inputs])
-        dist = self.session.run(self.output, feed_dict=feed_dict)
+        dist = self.session.run(self.output, feed_dict=feed_dict,
+                                options=tf.RunOptions(trace_level=tf.RunOptions.FULL_TRACE),
+                                run_metadata=self.run_metadata)
         random_epsilon = 0.0 if testing else self.options.pg_random_epsilon
         action = sample(dist, random_epsilon=random_epsilon)[0]
         self.actions.append(action)
