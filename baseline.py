@@ -5,10 +5,11 @@ import numpy as np
 from Queue import PriorityQueue
 
 from stanza.monitoring import progress
-from stanza.research import config
+from stanza.research import config, iterators
 from stanza.research.learner import Learner
 
 import cards_env
+from helpers import profile
 
 parser = config.get_options_parser()
 parser.add_argument('--max_steps', type=int, default=1000,
@@ -29,6 +30,7 @@ class CardsLearner(Learner):
     def num_params(self):
         raise NotImplementedError
 
+    @profile
     def predict_and_score(self, eval_instances, random='ignored', verbosity=0):
         self.get_options()
 
@@ -38,32 +40,46 @@ class CardsLearner(Learner):
 
         env = gym.make(cards_env.register())
 
-        if self.options.verbosity + verbosity >= 1:
-            progress.start_task('Eval instance', len(eval_instances))
+        batches = iterators.gen_batches(eval_instances, batch_size=cards_env.MAX_BATCH_SIZE)
 
-        for i, inst in enumerate(eval_instances):
+        if self.options.verbosity + verbosity >= 1:
+            progress.start_task('Eval batch', len(batches))
+
+        for i, batch in enumerate(batches):
+            batch = list(batch)
             if self.options.verbosity + verbosity >= 1:
                 progress.progress(i)
 
-            total_reward = 0.
+            total_reward = np.zeros((len(batch),))
+            done = np.zeros((len(batch),), dtype=np.bool)
 
-            env.configure(inst.input, verbosity=verbosity)
+            env.configure([inst.input for inst in batch], verbosity=verbosity)
             observation = env._get_obs()
             info = None
             self.init_belief(env, observation)
+
+            if self.options.verbosity + verbosity >= 1:
+                progress.start_task('Step', self.options.max_steps)
+
             for step in range(self.options.max_steps):
+                if self.options.verbosity + verbosity >= 1:
+                    progress.progress(step)
                 if self.options.render:
                     env.render()
                 action = self.action(env, observation, info)
-                prev_obs = observation
-                observation, reward, done, info = env.step(action)
+                prev_obs = [np.copy(a) for a in observation]
+                observation, reward, done_step, info = env.step(action)
                 self.update_belief(env, prev_obs, action, observation, reward, info)
-                total_reward += reward
-                if done:
+                done = np.bitwise_or(done, done_step[:len(batch)])
+                total_reward += np.array(reward[:len(batch)]) * (1. - done)
+                if done.all():
                     break
 
-            predictions.append('')
-            scores.append(total_reward)
+            if self.options.verbosity + verbosity >= 1:
+                progress.end_task()
+
+            predictions.extend([''] * len(batch))
+            scores.extend(total_reward.tolist())
 
         env.close()
 
@@ -137,53 +153,69 @@ class SearcherLearner(CardsLearner):
     def num_params(self):
         return 0
 
+    @profile
     def action(self, env, observation, info, testing=True):
-        if self.target_loc is None:
-            return env.action_space.sample()
-        elif not self.path:
-            walls, cards, player, hand, floor, language = observation
-            self.new_search(np.maximum(walls, self.invisible_walls), cards, player)
+        actions = []
+        for w in range(cards_env.MAX_BATCH_SIZE):
+            if self.target_loc[w] is None:
+                actions.append(env.action_space.sample()[0])
+                continue
+            elif not self.path[w]:
+                walls, cards, player, hand, floor, language = observation[w * 6:(w + 1) * 6]
+                self.new_search(w, np.maximum(walls, self.invisible_walls[w]), cards, player)
 
-        if self.target_loc is None:
-            return env.action_space.sample()
-        else:
-            action, self.prev_dest = self.path.pop()
-            return cards_env.ACTIONS.index(action)
+            if self.target_loc[w] is None:
+                actions.append(env.action_space.sample()[0])
+            else:
+                action, self.prev_dest[w] = self.path[w].pop()
+                actions.append(cards_env.ACTIONS.index(action))
+        return actions
 
     def init_belief(self, env, observation):
-        walls, cards, player, hand, floor, language = observation
-        self.invisible_walls = np.zeros(walls.shape)
-        self.explored = player
-        self.new_search(walls, cards, player)
+        self.invisible_walls = []
+        self.explored = []
+        self.target_loc = []
+        self.prev_dest = []
+        self.path = []
+        for w in range(cards_env.MAX_BATCH_SIZE):
+            walls, cards, player, hand, floor, language = observation[w * 6:(w + 1) * 6]
+            self.invisible_walls.append(np.zeros(walls.shape))
+            self.explored.append(np.copy(player))
+            self.target_loc.append(None)
+            self.prev_dest.append(None)
+            self.path.append(None)
+            self.new_search(w, walls, cards, player)
 
     def update_belief(self, env, prev_obs, action, observation, reward, info):
-        walls, cards, player, hand, floor, language = observation
-        self.explored = np.maximum(self.explored, player)
+        for w in range(cards_env.MAX_BATCH_SIZE):
+            walls, cards, player, hand, floor, language = observation[w * 6:(w + 1) * 6]
+            self.explored[w] = np.maximum(self.explored[w], player)
 
-        _, _, prev_player, _, _, _ = prev_obs
-        if self.target_loc is not None and (player == prev_player).all():
-            # We're searching and stayed in one place. Must be an invisible
-            # wall where we last tried to go.
-            self.invisible_walls[self.prev_dest] = 1.
-            self.new_search(np.maximum(walls, self.invisible_walls), cards, player)
+            prev_player = prev_obs[w * 6 + 2]
+            if self.target_loc[w] is not None and (player == prev_player).all():
+                # We're searching and stayed in one place. Must be an invisible
+                # wall where we last tried to go.
+                self.invisible_walls[w][self.prev_dest[w]] = 1.
+                self.new_search(w, np.maximum(walls, self.invisible_walls[w]), cards, player)
 
-    def new_search(self, walls, cards, player):
-        to_search = np.minimum(cards, 1 - self.explored)
+    @profile
+    def new_search(self, w, walls, cards, player):
+        to_search = np.minimum(cards, 1 - self.explored[w])
         if not to_search.any():
-            to_search = np.minimum(1 - walls, 1 - self.explored)
+            to_search = np.minimum(1 - walls, 1 - self.explored[w])
         if not to_search.any():
-            self.target_loc = None
+            self.target_loc[w] = None
             return
 
         paths = [(loc, pathfind(loc, player, walls))
                  for loc in all_locs(to_search)]
         path_len = lambda pair: float('inf') if pair[1] is None else len(pair[1])
-        self.target_loc, self.path = min(paths, key=path_len)
-        if self.path is None:
-            self.target_loc = None
+        self.target_loc[w], self.path[w] = min(paths, key=path_len)
+        if self.path[w] is None:
+            self.target_loc[w] = None
             return
 
-        self.path.reverse()
+        self.path[w].reverse()
 
 
 def all_locs(board):
@@ -198,6 +230,7 @@ def all_locs(board):
                 yield (r, c)
 
 
+@profile
 def pathfind(loc, player, walls):
     r'''
     >>> walls_str = '-----;' \
@@ -323,18 +356,18 @@ class OracleLearner(SearcherLearner):
                                                  testing=testing)
 
     def init_belief(self, env, observation):
-        self.ace_loc = env.cards_to_loc[(0, 0)]  # NOT FAIR!
-        self.true_walls = np.abs(env.walls)
+        self.ace_locs = [c2l[(0, 0)] for c2l in env.cards_to_loc]  # NOT FAIR!
+        self.true_walls = [np.abs(w) for w in env.walls]
         observation = self.remove_other_cards(observation)
         return super(OracleLearner, self).init_belief(env, observation)
 
     def remove_other_cards(self, observation):
-        cards = observation[1]
-        cards = np.zeros(cards.shape)
-        cards[self.ace_loc] = 1.
         observation = list(observation)
-        observation[1] = cards
-        observation[0] = self.true_walls
+        for w, start in enumerate(range(0, len(observation), 6)):
+            observation[start] = self.true_walls[w]
+            cards = np.zeros(observation[start + 1].shape)
+            cards[self.ace_locs[w]] = 1.
+            observation[start + 1] = cards
         return tuple(observation)
 
     def update_belief(self, env, prev_obs, action, observation, reward, info):

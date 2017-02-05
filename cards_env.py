@@ -13,6 +13,7 @@ except pyglet.canvas.xlib.NoSuchDisplayException:
 
 
 from cards_cache import all_transcripts
+from helpers import profile
 
 
 ACTIONS = ['nop',
@@ -23,6 +24,7 @@ ACTIONS = ['nop',
 SUITS = list('SCHD')
 RANKS = list('A23456789') + ['10'] + list('JQK')
 MAX_BOARD_SIZE = (26, 34)
+MAX_BATCH_SIZE = 10
 
 
 class CardsEnv(gym.Env):
@@ -38,7 +40,8 @@ class CardsEnv(gym.Env):
 
         # One action for each player
         player = spaces.Discrete(len(ACTIONS))
-        self.action_space = player  # should this be spaces.Tuple((player, player)) for 2 players?
+        # should this be spaces.Tuple((player, player)) for 2 players?
+        self.action_space = spaces.Tuple([player for _ in range(MAX_BATCH_SIZE)])
         # One board for walls, one for card observations, one for player location
         board = spaces.Box(np.zeros(MAX_BOARD_SIZE), np.ones(MAX_BOARD_SIZE))
         # TODO: represent language in observations
@@ -47,9 +50,12 @@ class CardsEnv(gym.Env):
                           np.ones((3, len(RANKS), len(SUITS))))
         floor = spaces.Box(np.zeros((len(RANKS), len(SUITS))),
                            np.ones((len(RANKS), len(SUITS))))
-        self.observation_space = spaces.Tuple((board, board, board, hand, floor, language))
+        all_obs = (board, board, board, hand, floor, language)
+        self.observation_space = spaces.Tuple([e
+                                               for _ in range(MAX_BATCH_SIZE)
+                                               for e in all_obs])
 
-        self.clear_board()
+        self.clear_boards()
         import world
         self.default_world = world.CardsWorld(all_transcripts()[0])
 
@@ -59,135 +65,148 @@ class CardsEnv(gym.Env):
         self.np_random, seed = seeding.np_random(seed)
         return [seed]
 
+    @profile
     def _step(self, u):
-        action = ACTIONS[u]
+        actions = [ACTIONS[a] for a in u]
+        rewards = []
+        done = []
+        for i, action in enumerate(actions):
+            if action == 'nop':
+                pass
+            elif action == 'right':
+                self._move(i, 0, 1)
+            elif action == 'up':
+                self._move(i, -1, 0)
+            elif action == 'left':
+                self._move(i, 0, -1)
+            elif action == 'down':
+                self._move(i, 1, 0)
+            elif action == 'pick':
+                self._pick(i)
+            elif action == 'drop0':
+                self._drop(i, 0)
+            elif action == 'drop1':
+                self._drop(i, 1)
+            elif action == 'drop2':
+                self._drop(i, 2)
+            elif action == 'speak':
+                self._speak(i)
+            else:
+                raise RuntimeError('invalid action name: %s' % (action,))
 
-        if action == 'nop':
-            pass
-        elif action == 'right':
-            self._move(0, 1)
-        elif action == 'up':
-            self._move(-1, 0)
-        elif action == 'left':
-            self._move(0, -1)
-        elif action == 'down':
-            self._move(1, 0)
-        elif action == 'pick':
-            self._pick()
-        elif action == 'drop0':
-            self._drop(0)
-        elif action == 'drop1':
-            self._drop(1)
-        elif action == 'drop2':
-            self._drop(2)
-        elif action == 'speak':
-            self._speak()
-        else:
-            raise RuntimeError('invalid action name: %s' % (action,))
-
-        done = self._is_done()
+            done_i = self._is_done(i)
+            done.append(done_i)
+            rewards.append(0.0 if done_i else -1.0)
         #      obs, reward, done, info
-        return self._get_obs(), (0.0 if done else -1.0), done, {}
+        return self._get_obs(), rewards, done, {}
 
-    def _move(self, dr, dc):
-        p1r, p1c = self.p1_loc
+    def _move(self, w, dr, dc):
+        p1r, p1c = self.p1_loc[w]
         new_loc = (p1r + dr, p1c + dc)
         if not self._is_in_bounds(new_loc):
             if self.verbosity >= 4:
                 print('move: OOB')
-        elif self.walls[new_loc]:
+        elif self.walls[w][new_loc]:
             if self.verbosity >= 4:
                 print('move: WALL')
         else:
-            self.p1_loc = new_loc
+            self.p1_loc[w] = new_loc
             if self.verbosity >= 4:
-                print('move: %s' % (self.p1_loc,))
+                print('move: %s' % (self.p1_loc[w],))
 
     def _is_in_bounds(self, loc):
         r, c = loc
-        return (0 <= r < self.walls.shape[0]) and (0 <= c < self.walls.shape[1])
+        return (0 <= r < self.walls.shape[1]) and (0 <= c < self.walls.shape[2])
 
-    def _pick(self):
+    def _pick(self, w):
         if self.verbosity >= 4:
             print('pick')
         pass  # TODO
 
-    def _drop(self, slot):
+    def _drop(self, w, slot):
         if self.verbosity >= 4:
             print('drop %s' % (slot,))
         pass  # TODO
 
-    def _speak(self):
+    def _speak(self, w):
         if self.verbosity >= 4:
             print('speak')
         pass  # TODO
 
-    def _is_done(self):
-        done = (0, 0) in self.loc_to_cards[self.p1_loc]
+    def _is_done(self, w):
+        done = (0, 0) in self.loc_to_cards[w][self.p1_loc[w]]
         if done and self.verbosity >= 2:
             print('FOUND THE ACE OF SPADES!')
         return done
 
     def _reset(self):
-        return self._configure(self.default_world, verbosity=0)
+        return self._configure(verbosity=0)
 
-    def clear_board(self):
-        self.walls = np.ones(MAX_BOARD_SIZE)
-        self.p1_loc = (0, 0)
-        self.p2_loc = (0, 0)
-        self.loc_to_cards = defaultdict(list)
-        self.cards_to_loc = defaultdict(lambda: None)
+    def clear_boards(self):
+        self.walls = np.ones((MAX_BATCH_SIZE,) + MAX_BOARD_SIZE)
+        self.p1_loc = [(0, 0) for _ in range(MAX_BATCH_SIZE)]
+        self.p2_loc = [(0, 0) for _ in range(MAX_BATCH_SIZE)]
+        self.loc_to_cards = [defaultdict(list) for _ in range(MAX_BATCH_SIZE)]
+        self.cards_to_loc = [defaultdict(lambda: None) for _ in range(MAX_BATCH_SIZE)]
 
-    def _configure(self, world=None, verbosity=None):
+    def _configure(self, worlds=None, verbosity=None):
         if verbosity is not None:
             self.verbosity = verbosity
 
-        if world is None:
-            world = self.default_world
+        if worlds is None:
+            worlds = [self.default_world for _ in range(MAX_BATCH_SIZE)]
 
-        self.clear_board()
+        self.clear_boards()
 
-        self.walls = np.copy(world.walls)
-        for card, loc in world.cards_to_loc.iteritems():
-            card = (RANKS.index(card[:-1]), SUITS.index(card[-1]))
-            self.cards_to_loc[card] = loc
-            self.loc_to_cards[loc].append(card)
+        for w, world in enumerate(worlds):
+            self.walls[w, :, :] = world.walls
+            for card, loc in world.cards_to_loc.iteritems():
+                card = (RANKS.index(card[:-1]), SUITS.index(card[-1]))
+                self.cards_to_loc[w][card] = loc
+                self.loc_to_cards[w][loc].append(card)
 
-        self.p1_loc = world.p1_loc
-        self.p2_loc = world.p2_loc
+            self.p1_loc[w] = world.p1_loc
+            self.p2_loc[w] = world.p2_loc
 
         if self.viewer and self.viewer.geoms:
             self.viewer.geoms = []
 
         return self._get_obs()
 
+    @profile
     def _get_obs(self):
-        # Invisible walls (walls = -1.0) are not observed (but still prevent movement)
-        wall_obs = np.maximum(self.walls, 0.0)
-        player_obs = np.zeros(self.walls.shape)
-        player_obs[self.p1_loc] = 1.0
-        language = np.array(0.)  # TODO
-        return (wall_obs, self._card_obs(), player_obs,
-                self._hand_obs(), self._floor_obs(), language)
+        all_obs = []
+        for w in range(MAX_BATCH_SIZE):
+            # Invisible walls (walls = -1.0) are not observed (but still prevent movement)
+            wall_obs = np.maximum(self.walls[w], 0.0)
+            player_obs = np.zeros(self.walls.shape[1:])
+            player_obs[self.p1_loc[w]] = 1.0
+            language = np.array(0.)  # TODO
+            all_obs.extend([wall_obs, self._card_obs(w), player_obs,
+                            self._hand_obs(w), self._floor_obs(w), language])
+        return all_obs
 
-    def _card_obs(self):
-        obs = np.zeros(self.walls.shape)
-        for (r, c), cards_here in self.loc_to_cards.iteritems():
+    @profile
+    def _card_obs(self, w):
+        obs = np.zeros(self.walls.shape[1:])
+        for (r, c), cards_here in self.loc_to_cards[w].iteritems():
             if cards_here:
                 obs[r, c] = 1.
         return obs
 
-    def _floor_obs(self):
-        cards_here = self.loc_to_cards[self.p1_loc]
+    def _floor_obs(self, w):
+        cards_here = self.loc_to_cards[w][self.p1_loc[w]]
         obs = np.zeros((len(RANKS), len(SUITS)))
         for rank, suit in cards_here:
             obs[rank, suit] = 1.
         return obs
 
-    def _hand_obs(self):
+    def _hand_obs(self, w):
         return np.zeros((3, len(RANKS), len(SUITS)))  # TODO
 
     def _render(self, mode='human', close=False):
+        RENDER_WORLD = 0
+
         if close:
             if self.viewer is not None:
                 self.viewer.close()
@@ -199,15 +218,15 @@ class CardsEnv(gym.Env):
             self.viewer.set_bounds(0, MAX_BOARD_SIZE[1], 0, MAX_BOARD_SIZE[0] + 2)
 
         if not self.viewer.geoms:
-            for r in range(self.walls.shape[0]):
-                for c in range(self.walls.shape[1]):
-                    if (r, c) in self.loc_to_cards:
-                        special = (0, 0) in self.loc_to_cards[(r, c)]
+            for r in range(self.walls.shape[1]):
+                for c in range(self.walls.shape[2]):
+                    if (r, c) in self.loc_to_cards[RENDER_WORLD]:
+                        special = (0, 0) in self.loc_to_cards[RENDER_WORLD][(r, c)]
                         card = make_card(r, c, special=special)
                         self.viewer.add_geom(card)
 
-                    if self.walls[r, c]:
-                        wall = make_wall(r, c, invisible=self.walls[r, c] < 0.0)
+                    if self.walls[RENDER_WORLD, r, c]:
+                        wall = make_wall(r, c, invisible=self.walls[RENDER_WORLD, r, c] < 0.0)
                         self.viewer.add_geom(wall)
 
             player = make_player()
@@ -223,7 +242,7 @@ class CardsEnv(gym.Env):
             # self.imgtrans = rendering.Transform()
             # self.img.add_attr(self.imgtrans)
 
-        pr, pc = self.p1_loc
+        pr, pc = self.p1_loc[RENDER_WORLD]
         self.player_transform.set_translation(pc, MAX_BOARD_SIZE[0] - pr)
 
         return self.viewer.render(return_rgb_array=(mode == 'rgb_array'))

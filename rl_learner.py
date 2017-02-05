@@ -121,48 +121,43 @@ class KarpathyPGLearner(CardsLearner):
 
     @profile
     def train_one_batch(self, insts, env, t):
-        inputs = []
-        actions = []
-        rewards = []
 
-        if self.options.verbosity >= 1:
-            progress.start_task('Instance', len(insts))
+        env.configure([inst.input for inst in insts], verbosity=self.options.verbosity)
+        observation = env._get_obs()
+        info = None
+        self.init_belief(env, observation)
 
-        for i, inst in enumerate(insts):
-            if self.options.verbosity >= 1:
-                progress.progress(i)
-            env.configure(inst.input, verbosity=self.options.verbosity)
-            observation = env._get_obs()
-            info = None
-            self.init_belief(env, observation)
+        for step in range(self.options.max_steps):
+            if self.options.render:
+                env.render()
+            actions = self.action(env, observation, info, testing=False)
+            prev_obs = observation
+            observation, reward, done, info = env.step(actions)
+            self.update_belief(env, prev_obs, actions, observation, reward, info)
+            if done:
+                break
 
-            for step in range(self.options.max_steps):
-                if self.options.render:
-                    env.render()
-                action = self.action(env, observation, info, testing=False)
-                prev_obs = observation
-                observation, reward, done, info = env.step(action)
-                self.update_belief(env, prev_obs, action, observation, reward, info)
-                if done:
-                    break
+        from tensorflow.python.client import timeline
+        trace = timeline.Timeline(step_stats=self.run_metadata.step_stats)
 
-            from tensorflow.python.client import timeline
-            trace = timeline.Timeline(step_stats=self.run_metadata.step_stats)
+        with config.open('timeline.ctf.json', 'w') as trace_file:
+            trace_file.write(trace.generate_chrome_trace_format())
 
-            with config.open('timeline.ctf.json', 'w') as trace_file:
-                trace_file.write(trace.generate_chrome_trace_format())
-
-            inputs.extend(self.inputs[:-1])
-            actions.extend(self.actions)
-            action_hist = np.bincount(self.actions, minlength=len(cards_env.ACTIONS)).tolist()
-            print('Total reward: {}  {}'.format(sum(self.rewards), action_hist))
-            rewards.extend([sum(self.rewards)] * len(self.rewards))
+        rewards = np.array(self.rewards)  # max_steps x batch_size
+        actions = np.array(self.actions).reshape(rewards.shape)
+        for game in range(rewards.shape[1]):
+            action_hist = np.bincount(actions[:, game],
+                                      minlength=len(cards_env.ACTIONS)).tolist()
+            if self.options.verbosity >= 7:
+                print('Total reward: {}  {}'.format(rewards[game, :].sum(), action_hist))
+        total_rewards = np.repeat(rewards.sum(axis=0), rewards.shape[0])
+        assert total_rewards.shape == (rewards.shape[0] * rewards.shape[1],)
 
         if self.options.verbosity >= 1:
             progress.end_task()
 
-        feed_dict = self.batch_inputs(inputs)
-        for label, value in zip(self.label_vars, [np.array(actions), np.array(rewards)]):
+        feed_dict = self.batch_inputs(self.inputs[:-len(insts)])
+        for label, value in zip(self.label_vars, [np.array(self.actions), total_rewards]):
             feed_dict[label] = value
         ops = [self.train_update, self.summary_op]
         if self.options.detect_nans:
@@ -176,20 +171,23 @@ class KarpathyPGLearner(CardsLearner):
     def num_params(self):
         return 0
 
-    def action(self, env, observation, info, testing=True):
-        inputs = self.preprocess(observation)
-        feed_dict = self.batch_inputs([inputs])
+    def action(self, env, observations, info, testing=True):
+        inputs = self.preprocess(observations)
+        feed_dict = self.batch_inputs(inputs)
         dist = self.session.run(self.output, feed_dict=feed_dict,
                                 options=tf.RunOptions(trace_level=tf.RunOptions.FULL_TRACE),
                                 run_metadata=self.run_metadata)
         random_epsilon = 0.0 if testing else self.options.pg_random_epsilon
-        action = sample(dist, random_epsilon=random_epsilon)[0]
-        self.actions.append(action)
-        return action
+        actions = sample(dist, random_epsilon=random_epsilon)
+        self.actions.extend(actions)
+        return actions
 
-    def preprocess(self, observation):
-        walls, cards, player, hand, floor, language = observation
-        return walls, cards, player
+    def preprocess(self, observations):
+        processed = []
+        for start in range(0, len(observations), 6):
+            walls, cards, player, hand, floor, language = observations[start:start + 6]
+            processed.append([walls, cards, player])
+        return processed
 
     def batch_inputs(self, inputs):
         feed_dict = {}
@@ -197,14 +195,14 @@ class KarpathyPGLearner(CardsLearner):
             feed_dict[input_var] = np.array([inp[i] for inp in inputs])
         return feed_dict
 
-    def init_belief(self, env, observation):
+    def init_belief(self, env, observations):
         self.actions = []
         self.rewards = []
-        self.inputs = [self.preprocess(observation)]
+        self.inputs = self.preprocess(observations)
 
-    def update_belief(self, env, prev_obs, action, observation, reward, info):
-        self.rewards.append(reward)
-        self.inputs.append(self.preprocess(observation))
+    def update_belief(self, env, prev_obs, actions, observations, rewards, info):
+        self.rewards.append(rewards)
+        self.inputs.extend(self.preprocess(observations))
 
     def dump(self, prefix):
         '''
