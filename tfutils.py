@@ -70,3 +70,11 @@ def add_summary_ops():
                 with tf.control_dependencies(summary_op):
                     summary_op = [summ_type(message, output)]
     return tf.group(*summary_op)
+
+
+def print_shape(t):
+    print_node = tf.Print(t, [tf.shape(t)], message='{}: '.format(t))
+    with tf.control_dependencies([print_node]):
+        attached = tf.identity(t)
+    return attached
+
