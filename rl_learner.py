@@ -121,27 +121,34 @@ class KarpathyPGLearner(CardsLearner):
 
     @profile
     def train_one_batch(self, insts, env, t):
-
         env.configure([inst.input for inst in insts], verbosity=self.options.verbosity)
         observation = env._get_obs()
         info = None
         self.init_belief(env, observation)
 
+        if self.options.verbosity >= 1:
+            progress.start_task('Step', self.options.max_steps)
+
         for step in range(self.options.max_steps):
+            if self.options.verbosity >= 1:
+                progress.progress(step)
+
             if self.options.render:
                 env.render()
             actions = self.action(env, observation, info, testing=False)
             prev_obs = observation
             observation, reward, done, info = env.step(actions)
             self.update_belief(env, prev_obs, actions, observation, reward, info)
-            if done:
+            if all(done):
                 break
 
+        '''
         from tensorflow.python.client import timeline
         trace = timeline.Timeline(step_stats=self.run_metadata.step_stats)
 
         with config.open('timeline.ctf.json', 'w') as trace_file:
             trace_file.write(trace.generate_chrome_trace_format())
+        '''
 
         rewards = np.array(self.rewards)  # max_steps x batch_size
         actions = np.array(self.actions).reshape(rewards.shape)
@@ -156,7 +163,7 @@ class KarpathyPGLearner(CardsLearner):
         if self.options.verbosity >= 1:
             progress.end_task()
 
-        feed_dict = self.batch_inputs(self.inputs[:-len(insts)])
+        feed_dict = self.batch_inputs(self.inputs[:-cards_env.MAX_BATCH_SIZE])
         for label, value in zip(self.label_vars, [np.array(self.actions), total_rewards]):
             feed_dict[label] = value
         ops = [self.train_update, self.summary_op]
@@ -174,9 +181,9 @@ class KarpathyPGLearner(CardsLearner):
     def action(self, env, observations, info, testing=True):
         inputs = self.preprocess(observations)
         feed_dict = self.batch_inputs(inputs)
-        dist = self.session.run(self.output, feed_dict=feed_dict,
-                                options=tf.RunOptions(trace_level=tf.RunOptions.FULL_TRACE),
-                                run_metadata=self.run_metadata)
+        dist = self.session.run(self.output, feed_dict=feed_dict)
+                                # options=tf.RunOptions(trace_level=tf.RunOptions.FULL_TRACE),
+                                # run_metadata=self.run_metadata)
         random_epsilon = 0.0 if testing else self.options.pg_random_epsilon
         actions = sample(dist, random_epsilon=random_epsilon)
         self.actions.extend(actions)
