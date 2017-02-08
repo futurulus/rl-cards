@@ -1,13 +1,25 @@
 from collections import namedtuple
+import numpy as np
 
+from stanza.research.rng import config
 from stanza.research.instance import Instance
 from stanza.research.rng import get_rng
 
-from world import CardsWorld, build_world
+from world import CardsWorld, build_world, MAX_BOARD_SIZE
 from cards_cache import all_transcripts
 
 
 rng = get_rng()
+
+parser = config.get_options_parser()
+parser.add_argument('--dist_offset_row', type=int, default=1,
+                    help='Which row to place the ace of spades in '
+                         '(relative to player position). '
+                         'Used only in "dist" data_source.')
+parser.add_argument('--dist_offset_col', type=int, default=0,
+                    help='Which column to place the ace of spades in '
+                         '(relative to player position). '
+                         'Used only in "dist" data_source.')
 
 
 def cards_train():
@@ -68,6 +80,25 @@ def just_go_down():
             for _ in range(500)]
 
 
+def dist():
+    walls = np.zeros(MAX_BOARD_SIZE)
+    walls[0, :] = 1.
+    walls[:, 0] = 1.
+    walls[-1, :] = 1.
+    walls[:, -1] = 1.
+    player_loc = (walls.shape[0] / 2, walls.shape[1] / 2)
+    options = config.options()
+    card_loc = (player_loc[0] + options.dist_offset_row,
+                player_loc[1] + options.dist_offset_col)
+    if not (1 <= card_loc[0] < walls.shape[0] - 1 and
+            1 <= card_loc[1] < walls.shape[1] - 1):
+        raise ValueError('Card loc {} for dist is not in bounds {}; fix '
+                         'dist_offset_[row,col].'.format(card_loc, walls.shape))
+    cards_to_loc = {'AS': card_loc}
+    return [Instance(input=build_world(walls, cards_to_loc, p1_loc=player_loc), output=0)
+            for _ in range(500)]
+
+
 DataSource = namedtuple('DataSource', ['train_data', 'test_data'])
 
 SOURCES = {
@@ -76,4 +107,5 @@ SOURCES = {
     'single_loc': DataSource(single_loc_train, single_loc_dev),
     'only_ace': DataSource(single_loc_train, single_loc_dev),
     'just_go_down': DataSource(just_go_down, just_go_down),
+    'dist': DataSource(dist, dist),
 }
