@@ -90,7 +90,8 @@ class KarpathyPGLearner(CardsLearner):
 
             action = tf.placeholder(tf.int32, shape=(None,), name='action')
             reward = tf.placeholder(tf.float32, shape=(None,), name='reward')
-            self.label_vars = [action, reward]
+            credit = tf.placeholder(tf.float32, shape=(None,), name='credit')
+            self.label_vars = [action, reward, credit]
 
             reward_mean, reward_variance = tfutils.moments(reward)
             normalized = tf.nn.batch_normalization(reward, reward_mean, reward_variance,
@@ -99,7 +100,7 @@ class KarpathyPGLearner(CardsLearner):
             logp = -tf.nn.sparse_softmax_cross_entropy_with_logits(self.output, action,
                                                                    name='action_log_prob')
             dlogp = 1 - tf.exp(logp)
-            loss = tf.reduce_mean(dlogp * normalized)
+            loss = tf.reduce_mean(dlogp * normalized * credit)
             tf.scalar_summary('loss', loss)
             var_list = tf.trainable_variables()
             print('Trainable variables:')
@@ -138,7 +139,7 @@ class KarpathyPGLearner(CardsLearner):
             actions = self.action(env, observation, info, testing=False)
             prev_obs = observation
             observation, reward, done, info = env.step(actions)
-            self.update_belief(env, prev_obs, actions, observation, reward, info)
+            self.update_belief(env, prev_obs, actions, observation, reward, done, info)
             if all(done):
                 break
 
@@ -151,22 +152,30 @@ class KarpathyPGLearner(CardsLearner):
         '''
 
         rewards = np.array(self.rewards)  # max_steps x batch_size
+        done = np.array(self.done, dtype=np.int32)  # max_steps x batch_size
         actions = np.array(self.actions).reshape(rewards.shape)
         # force actions on steps where reward is zero (already done) to nop
-        actions[1:, :] *= (rewards[:-1, :] != 0.0)
+        actions[1:, :] *= (1 - done)[:-1, :]
         for game in range(rewards.shape[1]):
             action_hist = np.bincount(actions[:, game],
                                       minlength=len(cards_env.ACTIONS)).tolist()
             if self.options.verbosity >= 7:
                 print('Total reward: {}  {}'.format(rewards[:, game].sum(), action_hist))
         total_rewards = np.repeat(rewards.sum(axis=0), rewards.shape[0])
-        assert total_rewards.shape == (rewards.shape[0] * rewards.shape[1],)
+        assert total_rewards.shape == (rewards.shape[0] * rewards.shape[1],), \
+            (total_rewards.shape, rewards.shape)
+        credit = np.ones(done.shape)
+        credit[1:, :] = 1.0 - done[:-1, :]
+        credit = (credit / credit.sum(axis=0)).ravel()
+        assert credit.shape == total_rewards.shape, (credit.shape, total_rewards.shape)
 
         if self.options.verbosity >= 1:
             progress.end_task()
 
         feed_dict = self.batch_inputs(self.inputs[:-cards_env.MAX_BATCH_SIZE])
-        for label, value in zip(self.label_vars, [np.array(self.actions), total_rewards]):
+        for label, value in zip(self.label_vars, [np.array(self.actions),
+                                                  total_rewards,
+                                                  credit]):
             feed_dict[label] = value
         ops = [self.train_update, self.summary_op]
         if self.options.detect_nans:
@@ -207,10 +216,12 @@ class KarpathyPGLearner(CardsLearner):
     def init_belief(self, env, observations):
         self.actions = []
         self.rewards = []
+        self.done = []
         self.inputs = self.preprocess(observations)
 
-    def update_belief(self, env, prev_obs, actions, observations, rewards, info):
+    def update_belief(self, env, prev_obs, actions, observations, rewards, done, info):
         self.rewards.append(rewards)
+        self.done.append(done)
         self.inputs.extend(self.preprocess(observations))
 
     def dump(self, prefix):

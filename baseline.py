@@ -69,7 +69,7 @@ class CardsLearner(Learner):
                 action = self.action(env, observation, info)
                 prev_obs = [np.copy(a) for a in observation]
                 observation, reward, done_step, info = env.step(action)
-                self.update_belief(env, prev_obs, action, observation, reward, info)
+                self.update_belief(env, prev_obs, action, observation, reward, done, info)
                 done = np.bitwise_or(done, done_step[:len(batch)])
                 total_reward += np.array(reward[:len(batch)]) * (1. - done)
                 if done.all():
@@ -94,7 +94,7 @@ class CardsLearner(Learner):
     def init_belief(self, env, observation):
         raise NotImplementedError
 
-    def update_belief(self, env, prev_obs, action, observation, reward, info):
+    def update_belief(self, env, prev_obs, action, observation, reward, done, info):
         raise NotImplementedError
 
     def get_options(self):
@@ -136,7 +136,7 @@ class RandomLearner(CardsLearner):
     def init_belief(self, env, observation):
         pass
 
-    def update_belief(self, env, prev_obs, action, observation, reward, info):
+    def update_belief(self, env, prev_obs, action, observation, reward, done, info):
         pass
 
 
@@ -186,7 +186,7 @@ class SearcherLearner(CardsLearner):
             self.path.append(None)
             self.new_search(w, walls, cards, player)
 
-    def update_belief(self, env, prev_obs, action, observation, reward, info):
+    def update_belief(self, env, prev_obs, action, observation, reward, done, info):
         for w in range(cards_env.MAX_BATCH_SIZE):
             walls, cards, player, hand, floor, language = observation[w * 6:(w + 1) * 6]
             self.explored[w] = np.maximum(self.explored[w], player)
@@ -370,6 +370,6 @@ class OracleLearner(SearcherLearner):
             observation[start + 1] = cards
         return tuple(observation)
 
-    def update_belief(self, env, prev_obs, action, observation, reward, info):
+    def update_belief(self, env, prev_obs, action, observation, reward, done, info):
         return super(OracleLearner, self).update_belief(env, prev_obs, action,
-                                                        observation, reward, info)
+                                                        observation, reward, done, info)
