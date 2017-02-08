@@ -137,6 +137,7 @@ class CardsEnv(gym.Env):
         if self.done[w]:
             return True
         elif (0, 0) in self.loc_to_cards[w][self.p1_loc[w]]:
+            self.done[w] = True
             if self.verbosity >= 9:
                 print('FOUND THE ACE OF SPADES!')
             return True
