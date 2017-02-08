@@ -44,6 +44,20 @@ def single_loc_dev():
     return insts
 
 
+def only_ace_train():
+    insts = cards_train()
+    for inst in insts:
+        inst.input.cards_to_loc = {'AS': inst.input.cards_to_loc['AS']}
+    return insts
+
+
+def only_ace_dev():
+    insts = cards_dev()
+    for inst in insts:
+        inst.input.cards_to_loc = {'AS': inst.input.cards_to_loc['AS']}
+    return insts
+
+
 def just_go_down():
     walls = [[1., 1., 1.],
              [1., 0., 1.],
@@ -60,5 +74,6 @@ SOURCES = {
     'cards_dev': DataSource(cards_train, cards_dev),
     'cards_test': DataSource(cards_train, cards_test),
     'single_loc': DataSource(single_loc_train, single_loc_dev),
+    'only_ace': DataSource(single_loc_train, single_loc_dev),
     'just_go_down': DataSource(just_go_down, just_go_down),
 }
