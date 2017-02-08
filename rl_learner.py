@@ -152,11 +152,13 @@ class KarpathyPGLearner(CardsLearner):
 
         rewards = np.array(self.rewards)  # max_steps x batch_size
         actions = np.array(self.actions).reshape(rewards.shape)
+        # force actions on steps where reward is zero (already done) to nop
+        actions[1:, :] *= (rewards[:-1, :] != 0.0)
         for game in range(rewards.shape[1]):
             action_hist = np.bincount(actions[:, game],
                                       minlength=len(cards_env.ACTIONS)).tolist()
             if self.options.verbosity >= 7:
-                print('Total reward: {}  {}'.format(rewards[game, :].sum(), action_hist))
+                print('Total reward: {}  {}'.format(rewards[:, game].sum(), action_hist))
         total_rewards = np.repeat(rewards.sum(axis=0), rewards.shape[0])
         assert total_rewards.shape == (rewards.shape[0] * rewards.shape[1],)
 
@@ -225,6 +227,8 @@ class KarpathyPGLearner(CardsLearner):
                         of the model file to be read
         '''
         self.build_graph()
+        if not hasattr(self, 'session'):
+            self.session = tf.Session(graph=self.graph)
         self.saver.restore(self.session, filename)
 
 

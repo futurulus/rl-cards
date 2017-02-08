@@ -104,14 +104,14 @@ class CardsEnv(gym.Env):
         p1r, p1c = self.p1_loc[w]
         new_loc = (p1r + dr, p1c + dc)
         if not self._is_in_bounds(new_loc):
-            if self.verbosity >= 4:
+            if self.verbosity >= 9:
                 print('move: OOB')
         elif self.walls[w][new_loc]:
-            if self.verbosity >= 4:
+            if self.verbosity >= 9:
                 print('move: WALL')
         else:
             self.p1_loc[w] = new_loc
-            if self.verbosity >= 4:
+            if self.verbosity >= 9:
                 print('move: %s' % (self.p1_loc[w],))
 
     def _is_in_bounds(self, loc):
@@ -119,30 +119,35 @@ class CardsEnv(gym.Env):
         return (0 <= r < self.walls.shape[1]) and (0 <= c < self.walls.shape[2])
 
     def _pick(self, w):
-        if self.verbosity >= 4:
+        if self.verbosity >= 9:
             print('pick')
         pass  # TODO
 
     def _drop(self, w, slot):
-        if self.verbosity >= 4:
+        if self.verbosity >= 9:
             print('drop %s' % (slot,))
         pass  # TODO
 
     def _speak(self, w):
-        if self.verbosity >= 4:
+        if self.verbosity >= 9:
             print('speak')
         pass  # TODO
 
     def _is_done(self, w):
-        done = (0, 0) in self.loc_to_cards[w][self.p1_loc[w]]
-        if done and self.verbosity >= 2:
-            print('FOUND THE ACE OF SPADES!')
-        return done
+        if self.done[w]:
+            return True
+        elif (0, 0) in self.loc_to_cards[w][self.p1_loc[w]]:
+            if self.verbosity >= 9:
+                print('FOUND THE ACE OF SPADES!')
+            return True
+        else:
+            return False
 
     def _reset(self):
         return self._configure(verbosity=0)
 
     def clear_boards(self):
+        self.done = np.zeros((MAX_BATCH_SIZE,), dtype=np.bool)
         self.walls = np.ones((MAX_BATCH_SIZE,) + MAX_BOARD_SIZE)
         self.p1_loc = [(0, 0) for _ in range(MAX_BATCH_SIZE)]
         self.p2_loc = [(0, 0) for _ in range(MAX_BATCH_SIZE)]
