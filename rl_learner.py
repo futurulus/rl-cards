@@ -183,7 +183,7 @@ class KarpathyPGLearner(CardsLearner):
         results = self.session.run(ops, feed_dict=feed_dict)
         summary = results[1]
         self.summary_writer.add_summary(summary, t)
-        print('Adding summary: {}'.format(t))
+        # print('Adding summary: {}'.format(t))
 
     @property
     def num_params(self):
@@ -193,8 +193,8 @@ class KarpathyPGLearner(CardsLearner):
         inputs = self.preprocess(observations)
         feed_dict = self.batch_inputs(inputs)
         dist = self.session.run(self.output, feed_dict=feed_dict)
-                                # options=tf.RunOptions(trace_level=tf.RunOptions.FULL_TRACE),
-                                # run_metadata=self.run_metadata)
+        #                       options=tf.RunOptions(trace_level=tf.RunOptions.FULL_TRACE),
+        #                       run_metadata=self.run_metadata)
         random_epsilon = 0.0 if testing else self.options.pg_random_epsilon
         actions = sample(dist, random_epsilon=random_epsilon)
         self.actions.extend(actions)
