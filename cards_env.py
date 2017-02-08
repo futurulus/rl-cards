@@ -219,6 +219,9 @@ class CardsEnv(gym.Env):
                 self.viewer = None
             return
 
+        if self.done[RENDER_WORLD]:
+            return
+
         if self.viewer is None:
             self.viewer = rendering.Viewer(500, 500)
             self.viewer.set_bounds(0, MAX_BOARD_SIZE[1], 0, MAX_BOARD_SIZE[0] + 2)
