@@ -23,6 +23,10 @@ parser.add_argument('--pg_random_epsilon', type=float, default=0.1,
                     help='The probability of taking a uniform random action during training.')
 parser.add_argument('--pg_grad_clip', type=float, default=5.0,
                     help='The maximum norm of a tensor gradient in training.')
+parser.add_argument('--pg_train_epochs', type=int, default=1,
+                    help='Number of times to pass through the data in training.')
+parser.add_argument('--move_only', type=config.boolean, default=False,
+                    help='If True, restrict actions to move actions (left, right, up, down).')
 parser.add_argument('--monitor_params', type=config.boolean, default=True,
                     help='If True, log histograms of parameters to Tensorboard.')
 parser.add_argument('--monitor_grads', type=config.boolean, default=True,
@@ -43,24 +47,35 @@ class KarpathyPGLearner(CardsLearner):
         self.session = tf.Session(graph=self.graph)
         self.init_params()
 
-        batches = iterators.iter_batches(training_instances,
-                                         self.options.pg_batch_size)
-        num_batches = (len(training_instances) - 1) // self.options.pg_batch_size + 1
-
         if self.options.verbosity >= 1:
-            progress.start_task('Batch', num_batches)
+            progress.start_task('Epoch', self.options.pg_train_epochs)
 
-        try:
-            for batch_num, batch in enumerate(batches):
-                if self.options.verbosity >= 1:
-                    progress.progress(batch_num)
-                self.train_one_batch(list(batch), env, t=batch_num)
-                if batch_num % 10 == 0:
-                    check_prefix = config.get_file_path('checkpoint')
-                    self.saver.save(self.session, check_prefix, global_step=batch_num)
-        except KeyboardInterrupt:
-            self.summary_writer.flush()
-            raise
+        for epoch in range(self.options.pg_train_epochs):
+            if self.options.verbosity >= 1:
+                progress.progress(epoch)
+
+            batches = iterators.iter_batches(training_instances,
+                                             self.options.pg_batch_size)
+            num_batches = (len(training_instances) - 1) // self.options.pg_batch_size + 1
+
+            if self.options.verbosity >= 1:
+                progress.start_task('Batch', num_batches)
+
+            try:
+                for batch_num, batch in enumerate(batches):
+                    if self.options.verbosity >= 1:
+                        progress.progress(batch_num)
+                    step = epoch * num_batches + batch_num
+                    self.train_one_batch(list(batch), env, t=step)
+                    if step % 10 == 0:
+                        check_prefix = config.get_file_path('checkpoint')
+                        self.saver.save(self.session, check_prefix, global_step=step)
+            except KeyboardInterrupt:
+                self.summary_writer.flush()
+                raise
+
+            if self.options.verbosity >= 1:
+                progress.end_task()
 
         if self.options.verbosity >= 1:
             progress.end_task()
@@ -100,7 +115,17 @@ class KarpathyPGLearner(CardsLearner):
             logp = -tf.nn.sparse_softmax_cross_entropy_with_logits(self.output, action,
                                                                    name='action_log_prob')
             dlogp = 1 - tf.exp(logp)
-            loss = tf.reduce_mean(dlogp * normalized * credit)
+            signal = dlogp * normalized * credit
+            signal_by_a = tf.reduce_sum(tf.reshape(signal, [-1, 10]), [0])
+            print_node = tf.Print(signal, [signal_by_a], message='signal_by_a: ', summarize=10)
+            with tf.control_dependencies([print_node]):
+                signal = tf.identity(signal)
+            loss = tf.reduce_mean(signal)
+            with tf.variable_scope('fully_connected_1', reuse=True):
+                biases = tf.get_variable('biases')
+            print_node = tf.Print(loss, [biases], message='biases: ', summarize=10)
+            with tf.control_dependencies([print_node]):
+                loss = tf.identity(loss)
             tf.scalar_summary('loss', loss)
             var_list = tf.trainable_variables()
             print('Trainable variables:')
@@ -166,7 +191,7 @@ class KarpathyPGLearner(CardsLearner):
             (total_rewards.shape, rewards.shape)
         credit = np.ones(done.shape)
         credit[1:, :] = 1.0 - done[:-1, :]
-        credit = (credit / credit.sum(axis=0)).ravel()
+        credit = credit.ravel()  # (credit / credit.sum(axis=0)).ravel()
         assert credit.shape == total_rewards.shape, (credit.shape, total_rewards.shape)
 
         if self.options.verbosity >= 1:
@@ -196,6 +221,9 @@ class KarpathyPGLearner(CardsLearner):
         #                       options=tf.RunOptions(trace_level=tf.RunOptions.FULL_TRACE),
         #                       run_metadata=self.run_metadata)
         random_epsilon = 0.0 if testing else self.options.pg_random_epsilon
+        if self.options.move_only:
+            dist[:, 0] = -float('inf')
+            dist[:, 5:] = -float('inf')
         actions = sample(dist, random_epsilon=random_epsilon)
         self.actions.extend(actions)
         return actions
