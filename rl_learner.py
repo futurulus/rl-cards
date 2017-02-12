@@ -126,7 +126,7 @@ class KarpathyPGLearner(CardsLearner):
             print_node = tf.Print(loss, [biases], message='biases: ', summarize=10)
             with tf.control_dependencies([print_node]):
                 loss = tf.identity(loss)
-            tf.scalar_summary('loss', loss)
+            tf.summary.scalar('loss', loss)
             var_list = tf.trainable_variables()
             print('Trainable variables:')
             for var in var_list:
@@ -136,14 +136,14 @@ class KarpathyPGLearner(CardsLearner):
             self.check_op = tf.add_check_numerics_ops()
             if self.options.monitor_activations:
                 tfutils.add_summary_ops()
-            self.summary_op = tf.merge_all_summaries()
-            self.summary_writer = tf.train.SummaryWriter(self.options.run_dir, self.graph)
+            self.summary_op = tf.summary.merge_all()
+            self.summary_writer = tf.summary.FileWriter(self.options.run_dir, self.graph)
             self.saver = tf.train.Saver()
             self.run_metadata = tf.RunMetadata()
 
     def init_params(self):
         with self.graph.as_default():
-            tf.initialize_all_variables().run(session=self.session)
+            tf.global_variables_initializer().run(session=self.session)
 
     @profile
     def train_one_batch(self, insts, env, t):

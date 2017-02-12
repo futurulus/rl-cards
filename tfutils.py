@@ -37,14 +37,14 @@ NO_MONITOR = [
 
 def add_summary_ops():
     '''
-    Connect a `histogram_summary` or `scalar_summary` to every floating point
-    tensor. `scalar_summary` operations are added for each scalar `half`, `float`,
-    or `double` tensor in the graph, and `histogram_summary` operations for each
+    Connect a `histogram` or `scalar` summary node to every floating point
+    tensor. `scalar` summary operations are added for each scalar `half`, `float`,
+    or `double` tensor in the graph, and `histogram` summary operations for each
     tensor with rank at least 1. Operations which have names indicating they
-    aren't useful to monitor (constants and CheckNumerics ops) are skipped.
+    aren't useful to monitor (constants and `CheckNumerics` ops) are skipped.
 
-    For all ops in the graph, the `scalar_summary` op for all of its (`half`,
-    `float`, or `double`) inputs is guaranteed to run before the `scalar_summary`
+    For all ops in the graph, the `scalar` summary op for all of its (`half`,
+    `float`, or `double`) inputs is guaranteed to run before the `scalar` summary
     op on any of its outputs.
 
     Based on `tf.add_check_numerics_ops`.
@@ -63,9 +63,9 @@ def add_summary_ops():
         for output in op.outputs:
             if output.dtype in [tf.float16, tf.float32, tf.float64]:
                 if output.get_shape().ndims == 0:
-                    summ_type = tf.scalar_summary
+                    summ_type = tf.summary.scalar
                 else:
-                    summ_type = tf.histogram_summary
+                    summ_type = tf.summary.histogram
                 message = op.name + ":" + str(output.value_index)
                 with tf.control_dependencies(summary_op):
                     summary_op = [summ_type(message, output)]
