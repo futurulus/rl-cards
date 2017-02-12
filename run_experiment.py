@@ -18,16 +18,16 @@ parser.add_argument('--load', metavar='MODEL_FILE', default=None,
                     help='If provided, skip training and instead load a pretrained model '
                          'from the specified path. If None or an empty string, train a '
                          'new model.')
-parser.add_argument('--train_size', type=int, default=None,
+parser.add_argument('--train_size', type=int, default=-1,
                     help='The number of examples to use in training. This number should '
-                         '*include* examples held out for validation. If None, use the '
+                         '*include* examples held out for validation. If negative, use the '
                          'whole training set.')
 parser.add_argument('--validation_size', type=int, default=0,
                     help='The number of examples to hold out from the training set for '
                          'monitoring generalization error.')
-parser.add_argument('--test_size', type=int, default=None,
+parser.add_argument('--test_size', type=int, default=-1,
                     help='The number of examples to use in testing. '
-                         'If None, use the whole dev/test set.')
+                         'If negative, use the whole dev/test set.')
 parser.add_argument('--data_source', default='cards_dev', choices=datasets.SOURCES.keys(),
                     help='The type of data to use.')
 parser.add_argument('--metrics', default=['reward'],
@@ -50,7 +50,10 @@ def main():
 
     progress.set_resolution(datetime.timedelta(seconds=options.progress_tick))
 
-    train_data = datasets.SOURCES[options.data_source].train_data()[:options.train_size]
+    train_size = options.train_size if options.train_size >= 0 else None
+    test_size = options.test_size if options.test_size >= 0 else None
+
+    train_data = datasets.SOURCES[options.data_source].train_data()[:train_size]
     if options.validation_size:
         assert options.validation_size < len(train_data), \
             ('No training data after validation split! (%d <= %d)' %
@@ -59,7 +62,7 @@ def main():
         train_data = train_data[:-options.validation_size]
     else:
         validation_data = None
-    test_data = datasets.SOURCES[options.data_source].test_data()[:options.test_size]
+    test_data = datasets.SOURCES[options.data_source].test_data()[:test_size]
 
     learner = learners.new(options.learner)
 
