@@ -114,19 +114,18 @@ class KarpathyPGLearner(CardsLearner):
             opt = tf.train.RMSPropOptimizer(learning_rate=0.1)
             logp = -tf.nn.sparse_softmax_cross_entropy_with_logits(self.output, action,
                                                                    name='action_log_prob')
-            dlogp = 1 - tf.exp(logp)
-            signal = dlogp * normalized * credit
+            dlogp = tf.sub(1.0, tf.exp(logp), name='dlogp')
+            signal = tf.neg(dlogp * normalized * credit, name='signal')
             signal_by_a = tf.reduce_sum(tf.reshape(signal, [-1, 10]), [0])
             print_node = tf.Print(signal, [signal_by_a], message='signal_by_a: ', summarize=10)
             with tf.control_dependencies([print_node]):
                 signal = tf.identity(signal)
-            loss = tf.reduce_mean(signal)
+            loss = tf.reduce_mean(signal, name='loss')
             with tf.variable_scope('fully_connected_1', reuse=True):
                 biases = tf.get_variable('biases')
             print_node = tf.Print(loss, [biases], message='biases: ', summarize=10)
             with tf.control_dependencies([print_node]):
                 loss = tf.identity(loss)
-            tf.summary.scalar('loss', loss)
             var_list = tf.trainable_variables()
             print('Trainable variables:')
             for var in var_list:
@@ -278,7 +277,7 @@ def sample(a, temperature=1.0, random_epsilon=0.0, verbose=False):
         raise ValueError('scalar is not a valid probability distribution')
     elif len(a.shape) == 1:
         # Cast to higher resolution to try to get high-precision normalization
-        a = np.exp(a / temperature).astype(np.float64)
+        a = np.exp((a / temperature).astype(np.float64))
         a /= np.sum(a)
         if random_epsilon:
             a = random_epsilon * np.ones(a.shape, dtype=np.float64) / a.shape[0] + \
