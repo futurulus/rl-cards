@@ -27,6 +27,8 @@ parser.add_argument('--pg_train_epochs', type=int, default=1,
                     help='Number of times to pass through the data in training.')
 parser.add_argument('--move_only', type=config.boolean, default=False,
                     help='If True, restrict actions to move actions (left, right, up, down).')
+parser.add_argument('--bias_only', type=config.boolean, default=False,
+                    help='If True, ignore input and only learn overall preference for actions.')
 parser.add_argument('--monitor_params', type=config.boolean, default=True,
                     help='If True, log histograms of parameters to Tensorboard.')
 parser.add_argument('--monitor_grads', type=config.boolean, default=True,
@@ -99,9 +101,17 @@ class KarpathyPGLearner(CardsLearner):
             combined_input = tf.concat(1, flattened, name='combined_input')
 
             fc = tf.contrib.layers.fully_connected
-            hidden1 = fc(combined_input, trainable=True, num_outputs=self.options.pg_hidden_size)
-            self.output = fc(hidden1, trainable=True, activation_fn=tf.identity,
-                             num_outputs=len(cards_env.ACTIONS))
+            if self.options.bias_only:
+                self.output = fc(0.0 * combined_input, trainable=True,
+                                 activation_fn=tf.identity, num_outputs=len(cards_env.ACTIONS))
+                with tf.variable_scope('fully_connected', reuse=True):
+                    biases = tf.get_variable('biases')
+            else:
+                hidden1 = fc(combined_input, trainable=True, num_outputs=self.options.pg_hidden_size)
+                self.output = fc(hidden1, trainable=True, activation_fn=tf.identity,
+                                 num_outputs=len(cards_env.ACTIONS))
+                with tf.variable_scope('fully_connected_1', reuse=True):
+                    biases = tf.get_variable('biases')
 
             action = tf.placeholder(tf.int32, shape=(None,), name='action')
             reward = tf.placeholder(tf.float32, shape=(None,), name='reward')
@@ -112,17 +122,17 @@ class KarpathyPGLearner(CardsLearner):
             normalized = tf.nn.batch_normalization(reward, reward_mean, reward_variance,
                                                    scale=1.0, offset=0.0, variance_epsilon=1e-4)
             opt = tf.train.RMSPropOptimizer(learning_rate=0.1)
-            logp = -tf.nn.sparse_softmax_cross_entropy_with_logits(self.output, action,
-                                                                   name='action_log_prob')
+            logp = tf.neg(tf.nn.sparse_softmax_cross_entropy_with_logits(self.output, action),
+                          name='action_log_prob')
             dlogp = tf.sub(1.0, tf.exp(logp), name='dlogp')
-            signal = tf.neg(dlogp * normalized * credit, name='signal')
-            signal_by_a = tf.reduce_sum(tf.reshape(signal, [-1, 10]), [0])
-            print_node = tf.Print(signal, [signal_by_a], message='signal_by_a: ', summarize=10)
+            signal = tf.mul(dlogp, normalized * credit, name='signal')
+            signal_down = tf.reduce_sum(tf.slice(tf.reshape(signal, [-1, 10]),
+                                                 [0, 1], [-1, 1]),
+                                        [0], name='signal_down')
+            print_node = tf.Print(signal, [signal_down], message='signal_down: ', summarize=10)
             with tf.control_dependencies([print_node]):
                 signal = tf.identity(signal)
-            loss = tf.reduce_mean(signal, name='loss')
-            with tf.variable_scope('fully_connected_1', reuse=True):
-                biases = tf.get_variable('biases')
+            loss = tf.reduce_mean(-signal, name='loss')
             print_node = tf.Print(loss, [biases], message='biases: ', summarize=10)
             with tf.control_dependencies([print_node]):
                 loss = tf.identity(loss)
