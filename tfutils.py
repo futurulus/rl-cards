@@ -61,7 +61,9 @@ def add_summary_ops():
         if op.name and any(re.search(pattern, op.name) for pattern in NO_MONITOR):
             continue
         for output in op.outputs:
-            if output.dtype in [tf.float16, tf.float32, tf.float64]:
+            if output.dtype in [tf.float16, tf.float32, tf.float64] and \
+                    output.op._get_control_flow_context() == \
+                    tf.get_default_graph()._get_control_flow_context():
                 if output.get_shape().ndims == 0:
                     summ_type = tf.summary.scalar
                 else:
@@ -77,4 +79,3 @@ def print_shape(t):
     with tf.control_dependencies([print_node]):
         attached = tf.identity(t)
     return attached
-
