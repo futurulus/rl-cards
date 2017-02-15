@@ -30,7 +30,7 @@ parser.add_argument('--test_size', type=int, default=-1,
                          'If negative, use the whole dev/test set.')
 parser.add_argument('--data_source', default='cards_dev', choices=datasets.SOURCES.keys(),
                     help='The type of data to use.')
-parser.add_argument('--metrics', default=['reward'],
+parser.add_argument('--metrics', default=['reward'], nargs='+',
                     choices=metrics.METRICS.keys(),
                     help='The evaluation metrics to report for the experiment.')
 parser.add_argument('--output_train_data', type=config.boolean, default=False,
