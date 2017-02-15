@@ -3,7 +3,7 @@ import numpy as np
 import tensorflow as tf
 
 from stanza.monitoring import progress
-from stanza.research import config, iterators
+from stanza.research import config, iterators, learner
 from stanza.research.rng import get_rng
 
 import cards_env
@@ -39,7 +39,68 @@ parser.add_argument('--detect_nans', type=config.boolean, default=True,
                     help='If True, error when a NaN is detected.')
 
 
-class KarpathyPGLearner(CardsLearner):
+class TensorflowLearner(learner.Learner):
+    @property
+    def num_params(self):
+        total = 0
+        with self.graph.as_default():
+            for var in tf.trainable_variables():
+                total += np.prod(var.eval(self.session).shape)
+        return total
+
+    def init_params(self):
+        self.step = 0
+        with self.graph.as_default():
+            tf.global_variables_initializer().run(session=self.session)
+
+    def build_graph(self):
+        if hasattr(self, 'graph'):
+            return
+
+        self.graph = tf.Graph()
+        with self.graph.as_default():
+            self.input_vars, self.label_vars, self.train_op, self.predict_op = self.get_layers()
+            self.check_op = tf.add_check_numerics_ops()
+            if self.options.monitor_activations:
+                tfutils.add_summary_ops()
+            self.summary_op = tf.summary.merge_all()
+            self.summary_writer = tf.summary.FileWriter(self.options.run_dir, self.graph)
+            self.saver = tf.train.Saver()
+            self.run_metadata = tf.RunMetadata()
+
+    def run_train(self, feed_dict):
+        self.step += 1
+        ops = [self.train_op, self.summary_op]
+        if self.options.detect_nans:
+            ops.append(self.check_op)
+        results = self.session.run(ops, feed_dict=feed_dict)
+        summary = results[1]
+        self.summary_writer.add_summary(summary, self.step)
+
+    def get_layers(self):
+        raise NotImplementedError
+        return 'input_vars', 'label_vars', 'train_op', 'predict_op'
+
+    def dump(self, prefix):
+        '''
+        :param outfile: The *path prefix* (a string, not a file-like object!)
+                        of the model file to be written
+        '''
+        self.build_graph()
+        self.saver.save(self.session, prefix, global_step=0)
+
+    def load(self, filename):
+        '''
+        :param outfile: The *path* (a string, not a file-like object!)
+                        of the model file to be read
+        '''
+        self.build_graph()
+        if not hasattr(self, 'session'):
+            self.session = tf.Session(graph=self.graph)
+        self.saver.restore(self.session, filename)
+
+
+class KarpathyPGLearner(TensorflowLearner, CardsLearner):
     @profile
     def train(self, training_instances, validation_instances='ignored', metrics='ignored'):
         self.build_graph()
@@ -82,77 +143,64 @@ class KarpathyPGLearner(CardsLearner):
         if self.options.verbosity >= 1:
             progress.end_task()
 
-    def build_graph(self):
-        if hasattr(self, 'graph'):
-            return
+    def get_layers(self):
+        walls = tf.placeholder(tf.float32, shape=(None,) + cards_env.MAX_BOARD_SIZE,
+                               name='walls')
+        cards = tf.placeholder(tf.float32, shape=(None,) + cards_env.MAX_BOARD_SIZE,
+                               name='cards')
+        player = tf.placeholder(tf.float32, shape=(None,) + cards_env.MAX_BOARD_SIZE,
+                                name='player')
+        input_vars = [walls, cards, player]
 
-        self.graph = tf.Graph()
-        with self.graph.as_default():
-            walls = tf.placeholder(tf.float32, shape=(None,) + cards_env.MAX_BOARD_SIZE,
-                                   name='walls')
-            cards = tf.placeholder(tf.float32, shape=(None,) + cards_env.MAX_BOARD_SIZE,
-                                   name='cards')
-            player = tf.placeholder(tf.float32, shape=(None,) + cards_env.MAX_BOARD_SIZE,
-                                    name='player')
-            self.input_vars = [walls, cards, player]
+        flattened = [tf.contrib.layers.flatten(t)
+                     for t in (walls, cards, player)]
+        combined_input = tf.concat(1, flattened, name='combined_input')
 
-            flattened = [tf.contrib.layers.flatten(t)
-                         for t in (walls, cards, player)]
-            combined_input = tf.concat(1, flattened, name='combined_input')
+        fc = tf.contrib.layers.fully_connected
+        if self.options.bias_only:
+            predict_op = fc(0.0 * combined_input, trainable=True,
+                            activation_fn=tf.identity, num_outputs=len(cards_env.ACTIONS))
+            with tf.variable_scope('fully_connected', reuse=True):
+                biases = tf.get_variable('biases')
+        else:
+            hidden1 = fc(combined_input, trainable=True,
+                         num_outputs=self.options.pg_hidden_size)
+            predict_op = fc(hidden1, trainable=True, activation_fn=tf.identity,
+                            num_outputs=len(cards_env.ACTIONS))
+            with tf.variable_scope('fully_connected_1', reuse=True):
+                biases = tf.get_variable('biases')
 
-            fc = tf.contrib.layers.fully_connected
-            if self.options.bias_only:
-                self.output = fc(0.0 * combined_input, trainable=True,
-                                 activation_fn=tf.identity, num_outputs=len(cards_env.ACTIONS))
-                with tf.variable_scope('fully_connected', reuse=True):
-                    biases = tf.get_variable('biases')
-            else:
-                hidden1 = fc(combined_input, trainable=True, num_outputs=self.options.pg_hidden_size)
-                self.output = fc(hidden1, trainable=True, activation_fn=tf.identity,
-                                 num_outputs=len(cards_env.ACTIONS))
-                with tf.variable_scope('fully_connected_1', reuse=True):
-                    biases = tf.get_variable('biases')
+        action = tf.placeholder(tf.int32, shape=(None,), name='action')
+        reward = tf.placeholder(tf.float32, shape=(None,), name='reward')
+        credit = tf.placeholder(tf.float32, shape=(None,), name='credit')
+        label_vars = [action, reward, credit]
 
-            action = tf.placeholder(tf.int32, shape=(None,), name='action')
-            reward = tf.placeholder(tf.float32, shape=(None,), name='reward')
-            credit = tf.placeholder(tf.float32, shape=(None,), name='credit')
-            self.label_vars = [action, reward, credit]
+        reward_mean, reward_variance = tfutils.moments(reward)
+        normalized = tf.nn.batch_normalization(reward, reward_mean, reward_variance,
+                                               scale=1.0, offset=0.0, variance_epsilon=1e-4)
+        opt = tf.train.RMSPropOptimizer(learning_rate=0.1)
+        logp = tf.neg(tf.nn.sparse_softmax_cross_entropy_with_logits(predict_op, action),
+                      name='action_log_prob')
+        dlogp = tf.sub(1.0, tf.exp(logp), name='dlogp')
+        signal = tf.mul(dlogp, normalized * credit, name='signal')
+        signal_down = tf.reduce_sum(tf.slice(tf.reshape(signal, [-1, 10]),
+                                             [0, 1], [-1, 1]),
+                                    [0], name='signal_down')
+        print_node = tf.Print(signal, [signal_down], message='signal_down: ', summarize=10)
+        with tf.control_dependencies([print_node]):
+            signal = tf.identity(signal)
+        loss = tf.reduce_mean(-signal, name='loss')
+        print_node = tf.Print(loss, [biases], message='biases: ', summarize=10)
+        with tf.control_dependencies([print_node]):
+            loss = tf.identity(loss)
+        var_list = tf.trainable_variables()
+        print('Trainable variables:')
+        for var in var_list:
+            print(var.name)
+        train_op = minimize_with_grad_clip(opt, self.options.pg_grad_clip,
+                                           loss, var_list=var_list)
 
-            reward_mean, reward_variance = tfutils.moments(reward)
-            normalized = tf.nn.batch_normalization(reward, reward_mean, reward_variance,
-                                                   scale=1.0, offset=0.0, variance_epsilon=1e-4)
-            opt = tf.train.RMSPropOptimizer(learning_rate=0.1)
-            logp = tf.neg(tf.nn.sparse_softmax_cross_entropy_with_logits(self.output, action),
-                          name='action_log_prob')
-            dlogp = tf.sub(1.0, tf.exp(logp), name='dlogp')
-            signal = tf.mul(dlogp, normalized * credit, name='signal')
-            signal_down = tf.reduce_sum(tf.slice(tf.reshape(signal, [-1, 10]),
-                                                 [0, 1], [-1, 1]),
-                                        [0], name='signal_down')
-            print_node = tf.Print(signal, [signal_down], message='signal_down: ', summarize=10)
-            with tf.control_dependencies([print_node]):
-                signal = tf.identity(signal)
-            loss = tf.reduce_mean(-signal, name='loss')
-            print_node = tf.Print(loss, [biases], message='biases: ', summarize=10)
-            with tf.control_dependencies([print_node]):
-                loss = tf.identity(loss)
-            var_list = tf.trainable_variables()
-            print('Trainable variables:')
-            for var in var_list:
-                print(var.name)
-            self.train_update = minimize_with_grad_clip(opt, self.options.pg_grad_clip,
-                                                        loss, var_list=var_list)
-            self.check_op = tf.add_check_numerics_ops()
-            if self.options.monitor_activations:
-                tfutils.add_summary_ops()
-            self.summary_op = tf.summary.merge_all()
-            self.summary_writer = tf.summary.FileWriter(self.options.run_dir, self.graph)
-            self.saver = tf.train.Saver()
-            self.run_metadata = tf.RunMetadata()
-
-    def init_params(self):
-        with self.graph.as_default():
-            tf.global_variables_initializer().run(session=self.session)
+        return input_vars, label_vars, train_op, predict_op
 
     @profile
     def train_one_batch(self, insts, env, t):
@@ -211,7 +259,7 @@ class KarpathyPGLearner(CardsLearner):
                                                   total_rewards,
                                                   credit]):
             feed_dict[label] = value
-        ops = [self.train_update, self.summary_op]
+        ops = [self.train_op, self.summary_op]
         if self.options.detect_nans:
             ops.append(self.check_op)
         results = self.session.run(ops, feed_dict=feed_dict)
@@ -219,14 +267,10 @@ class KarpathyPGLearner(CardsLearner):
         self.summary_writer.add_summary(summary, t)
         # print('Adding summary: {}'.format(t))
 
-    @property
-    def num_params(self):
-        return 0
-
     def action(self, env, observations, info, testing=True):
         inputs = self.preprocess(observations)
         feed_dict = self.batch_inputs(inputs)
-        dist = self.session.run(self.output, feed_dict=feed_dict)
+        dist = self.session.run(self.predict_op, feed_dict=feed_dict)
         #                       options=tf.RunOptions(trace_level=tf.RunOptions.FULL_TRACE),
         #                       run_metadata=self.run_metadata)
         random_epsilon = 0.0 if testing else self.options.pg_random_epsilon
@@ -260,24 +304,6 @@ class KarpathyPGLearner(CardsLearner):
         self.rewards.append(rewards)
         self.done.append(done)
         self.inputs.extend(self.preprocess(observations))
-
-    def dump(self, prefix):
-        '''
-        :param outfile: The *path prefix* (a string, not a file-like object!)
-                        of the model file to be written
-        '''
-        self.build_graph()
-        self.saver.save(self.session, prefix, global_step=0)
-
-    def load(self, filename):
-        '''
-        :param outfile: The *path* (a string, not a file-like object!)
-                        of the model file to be read
-        '''
-        self.build_graph()
-        if not hasattr(self, 'session'):
-            self.session = tf.Session(graph=self.graph)
-        self.saver.restore(self.session, filename)
 
 
 def sample(a, temperature=1.0, random_epsilon=0.0, verbose=False):
