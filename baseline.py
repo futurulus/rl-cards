@@ -23,7 +23,6 @@ class CardsLearner(Learner):
         self.get_options()
 
     def train(self, training_instances, validation_instances='ignored', metrics='ignored'):
-        pass
         raise NotImplementedError
 
     @property
