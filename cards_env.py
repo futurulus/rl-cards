@@ -195,8 +195,9 @@ class CardsEnv(gym.Env):
     @profile
     def _card_obs(self, w):
         obs = np.zeros(self.walls.shape[1:])
-        for (r, c), cards_here in self.loc_to_cards[w].iteritems():
-            if cards_here:
+        for loc, cards_here in self.loc_to_cards[w].iteritems():
+            if cards_here and not isinstance(loc, basestring):
+                r, c = loc
                 obs[r, c] = 1.
         return obs
 

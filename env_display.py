@@ -20,5 +20,5 @@ if __name__ == '__main__':
             action = dirs[rng.randint(0, len(dirs))]
             action_idx = cards_env.ACTIONS.index(action)
             observation, reward, done, info = env.step([action_idx])
-            if done:
+            if all(done):
                 break
