@@ -1,4 +1,5 @@
 import argparse
+import gzip
 import numpy as np
 import tensorflow as tf
 
@@ -141,6 +142,9 @@ class ReflexListener(TensorflowLearner):
 
         batches = iterators.gen_batches(eval_instances,
                                         batch_size=self.options.eval_batch_size)
+
+        with gzip.open(config.get_file_path('dists.b64.gz'), 'w'):
+            pass
 
         if self.options.verbosity + verbosity >= 1:
             progress.start_task('Eval batch', len(batches))
@@ -288,6 +292,11 @@ class ReflexListener(TensorflowLearner):
         assert card_loc_rows.shape[1:] == (num_cards, num_locs + 2), card_loc_rows.shape
         assert p2_loc.shape[1:] == (num_locs,), card_loc_rows.shape
 
+        with gzip.open(config.get_file_path('dists.b64.gz'), 'a') as outfile:
+            for row in summarize_output(card_loc_rows, p2_loc):
+                outfile.write(row)
+                outfile.write('\n')
+
         card_loc_indices = card_loc_rows.argmax(axis=2)
         p2_loc_indices = p2_loc.argmax(axis=1)
 
@@ -364,3 +373,65 @@ def coord_to_loc_index(coord, card=False):
         return idx + 2
     else:
         return idx
+
+
+def summarize_output(card_loc_rows, p2_loc):
+    '''
+    >>> summarize_output([
+    ...     [[-7.0, -8.0], [-50.0, -7.0]],
+    ...     [[-8.0, -7.0], [-50.0, -7.0]],
+    ... ], [[-8.0, -7.0], [-7.0, -8.0]])
+    ['v7F', 'F7v']
+    '''
+    # 71 07 17  17 07 71
+    # 57  7 15  15  7 57
+    #  v  7  F   F  7  v
+    rows = []
+    card_loc_rows = np.array(card_loc_rows)
+    p2_loc = np.array(p2_loc)
+
+    for i in range(card_loc_rows.shape[0]):
+        row = np.concatenate([card_loc_rows[i].ravel(), p2_loc[i]])
+        assert row.shape == (card_loc_rows.shape[1] * card_loc_rows.shape[2] + p2_loc.shape[1],), \
+            row.shape
+        row_quant = quantize(row)
+        rows.append(''.join(base64_char(row_quant[i], row_quant[i + 1])
+                            for i in range(0, row_quant.shape[0], 2)))
+    return rows
+
+
+def quantize(row):
+    '''
+    >>> quantize([-48.0, -7.0, -8.0, -9.0])
+    array([0, 7, 4, 1])
+    '''
+    row = np.copy(row)
+    row[row <= -30.0] = float('nan')
+    lower, upper = np.nanmin(row), np.nanmax(row)
+    result = np.zeros(row.shape, dtype=np.int)
+    offsets = (row[np.isfinite(row)] - lower) / (upper - lower)
+    result[np.isfinite(row)] = np.minimum((offsets * 7.0 + 1.0).astype(np.int), 7)
+    return result
+
+
+def base64_char(n1, n2):
+    '''
+    0 through 9, A through Z, a through z, '.', '/'
+
+    >>> base64_char(7, 1)
+    'v'
+    >>> base64_char(1, 7)
+    'F'
+    >>> base64_char(0, 7)
+    '7'
+    '''
+    assert 0 <= n1 < 8 and 0 <= n2 < 8, (n1, n2)
+    combined = n1 * 8 + n2
+    if combined < 10:
+        return str(combined)
+    elif combined < 36:
+        return chr(ord('A') + (combined - 10))
+    elif combined < 62:
+        return chr(ord('a') + (combined - 36))
+    else:
+        return chr(ord('.') + (combined - 62))

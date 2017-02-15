@@ -39,6 +39,14 @@ parser.add_argument('--detect_nans', type=config.boolean, default=True,
                     help='If True, error when a NaN is detected.')
 
 
+class Unpicklable(object):
+    def __init__(self, name):
+        self.name = name
+
+    def __repr__(self):
+        return '<%s removed in pickling>' % (self.name,)
+
+
 class TensorflowLearner(learner.Learner):
     @property
     def num_params(self):
@@ -67,6 +75,8 @@ class TensorflowLearner(learner.Learner):
             self.summary_writer = tf.summary.FileWriter(self.options.run_dir, self.graph)
             self.saver = tf.train.Saver()
             self.run_metadata = tf.RunMetadata()
+        # gpu_session(self.graph)
+        self.session = tf.Session(graph=self.graph)
 
     def run_train(self, feed_dict):
         self.step += 1
@@ -88,16 +98,30 @@ class TensorflowLearner(learner.Learner):
         '''
         self.build_graph()
         self.saver.save(self.session, prefix, global_step=0)
+        with open(prefix + '.pkl', 'wb') as outfile:
+            super(TensorflowLearner, self).dump(outfile)
 
     def load(self, filename):
         '''
         :param outfile: The *path* (a string, not a file-like object!)
                         of the model file to be read
         '''
+        with open(filename + '.pkl', 'rb') as infile:
+            super(TensorflowLearner, self).load(infile)
+        del self.graph
         self.build_graph()
         if not hasattr(self, 'session'):
             self.session = tf.Session(graph=self.graph)
-        self.saver.restore(self.session, filename)
+        self.saver.restore(self.session, filename + '-0')
+
+    def __getstate__(self):
+        state = dict(super(TensorflowLearner, self).__dict__)
+        for k in ['input_vars', 'label_vars', 'train_op', 'predict_op', 'check_op',
+                  'session', 'graph',
+                  'saver', 'summary_op', 'run_metadata', 'summary_writer']:
+            if k in state:
+                state[k] = Unpicklable(k)
+        return state
 
 
 class KarpathyPGLearner(TensorflowLearner, CardsLearner):
@@ -106,8 +130,6 @@ class KarpathyPGLearner(TensorflowLearner, CardsLearner):
         self.build_graph()
         env = gym.make(cards_env.register())
 
-        # gpu_session(self.graph)
-        self.session = tf.Session(graph=self.graph)
         self.init_params()
 
         if self.options.verbosity >= 1:
