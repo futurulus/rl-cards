@@ -120,7 +120,7 @@ def dist():
 def interpret(transcripts):
     options = config.options()
     insts = []
-    for i, trans in enumerate(transcripts[:10]):
+    for i, trans in enumerate(transcripts):
         if i % 100 == 0:
             print(i)
         pairs = world.event_world_pairs(trans)
