@@ -1,0 +1,227 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="UTF-8" />
+    <title>Cards dists</title>
+    <style>
+        body {
+            font-family: sans-serif;
+        }
+
+        h1 {
+            font-size: 150%;
+        }
+
+        div {
+            margin-bottom: 1ex;
+        }
+
+        #cards td {
+            border: 1px solid white;
+        }
+
+        #cards .selected {
+            border: 1px solid red;
+        }
+
+        .board td {
+            width: 1em;
+            background-color: #000;
+        }
+    </style>
+    <script src="https://ajax.googleapis.com/ajax/libs/jquery/1.11.3/jquery.min.js"></script>
+    <script src="dists.js"></script>
+    <script src="insts.js"></script>
+    <script>
+        RANKS = ['A', '2', '3', '4', '5', '6', '7', '8', '9', '10', 'J', 'Q', 'K'];
+        SUITS = ['♠', '♣', '♥', '♦'];
+
+        NUM_ROWS = 26;
+        NUM_COLS = 34;
+
+        row_idx = 0;
+        rank_idx = 0;
+        suit_idx = SUITS.length;
+
+        function build_board() {
+            $("#cards").html(build_card_table());
+            $("#board").html(build_board_table());
+        }
+
+        function reload_board() {
+            $("#row_idx").text(row_idx + 1);
+            $("#num_rows").text(ROWS.length);
+            $("#utt").text(INSTS[row_idx]["input"]["utt"].join(" "));
+            // $("#board").html("<p>" + ROWS[row_idx].length + "</p>");
+            var board_array = generate_array(ROWS[row_idx], rank_idx, suit_idx);
+            update_board_table(board_array);
+        }
+
+        function generate_array(row, rank, suit) {
+            var num_locs = NUM_ROWS * NUM_COLS;
+            var width_chars = (num_locs / 2 + 1);
+            var card_dist;
+            if (suit == SUITS.length) {
+                // P2 dist
+                var start = RANKS.length * SUITS.length * width_chars;
+                card_dist = row.substring(start);
+            } else {
+                var start = (rank * SUITS.length + suit) * width_chars;
+                card_dist = row.substring(start, start + width_chars);
+            }
+            return extract_rows(card_dist);
+        }
+
+        function card_name(rank, suit) {
+            return RANKS[rank] + SUITS[suit];
+        }
+
+        function build_table(html_class, data) {
+            var result = '<table class="' + html_class + '">';
+            for (var r = 0; r < data.length; r++) {
+                var row = data[r];
+                result += '<tr id="' + html_class + '-r' + r + '">';
+                for (var c = 0; c < row.length; c++) {
+                    result += '<td id="' + html_class + '-r' + r + 'c' + c + '">' +
+                              row[c] + '</td>';
+                }
+                result += '</tr>';
+            }
+            result += '</table>';
+            return result;
+        }
+
+        function build_card_table() {
+            var data = [];
+            for (var suit = 0; suit < 4; suit++) {
+                var row = [];
+                for (var rank = 0; rank < 13; rank++) {
+                    row.push(card_name(rank, suit));
+                }
+                data.push(row);
+            }
+            
+            data.push(['P2']);
+            return build_table("cards", data);
+        }
+
+        function build_board_table() {
+            var data = [];
+            for (var r = 0; r < NUM_ROWS; r++) {
+                var row = [];
+                for (var c = 0; c < NUM_COLS; c++) {
+                    row.push('&nbsp;');
+                }
+                data.push(row);
+            }
+            data[0].push('P2');
+            data[0].push('X');
+            return build_table("board", data);
+        }
+
+        function extract_rows(dist_chars) {
+            var result = [];
+            var sp;
+            if (dist_chars.length === NUM_ROWS * NUM_COLS / 2) sp = 0; else sp = 1;
+            for (var r = 0; r < NUM_ROWS; r++) {
+                var row = dist_chars.substring(sp + NUM_COLS / 2 * r, sp + NUM_COLS / 2 * (r + 1));
+                result.push(extract_row(row));
+            }
+            var special_cells = [0, 0];
+            if (sp !== 0) {
+                special_cells = extract_row(dist_chars.substring(0, sp));
+            }
+            for (var c = 0; c < sp; c++) {
+                result[0].push(special_cells[c]);
+            }
+            return result;
+        }
+        
+        function extract_row(row) {
+            var result = [];
+            for (var c = 0; c < row.length; c++) {
+                var pair = table_cells(row.charAt(c));
+                result.push(pair[0]);
+                result.push(pair[1]);
+            }
+            return result;
+        }
+
+        function table_cells(char) {
+            var code = char.charCodeAt(0);
+            var numeric = -1;
+            if ('0'.charCodeAt(0) <= code && code <= '9'.charCodeAt(0)) {
+                numeric = code - '0'.charCodeAt(0);
+            } else if ('A'.charCodeAt(0) <= code && code <= 'Z'.charCodeAt(0)) {
+                numeric = code - 'A'.charCodeAt(0) + 10;
+            } else if ('a'.charCodeAt(0) <= code && code <= 'z'.charCodeAt(0)) {
+                numeric = code - 'a'.charCodeAt(0) + 36;
+            } else {
+                numeric = code - '.'.charCodeAt(0) + 62;
+            }
+            return [Math.floor(numeric / 8), numeric % 8];
+        }
+
+        function update_board_table(board) {
+            $(".cards td").removeClass("selected");
+            $("#cards-r" + suit_idx + "c" + rank_idx).addClass("selected");
+            
+            $(".board td").each(function() {
+                var coord = $(this).attr("id").substring("cards-r".length).split('c');
+                var row = parseInt(coord[0]), col = parseInt(coord[1]);
+                $(this).css("background-color", heatmap_color(board[row][col]));
+            });
+        }
+
+        function heatmap_color(strength) {
+            if (strength === 0) {
+                return '#000';
+            } else {
+                var gb = (16 - 2 * strength).toString(16);
+                return '#F' + gb + gb;
+            }
+        }
+
+        $(document).ready(function() {
+            build_board();
+
+            $("#prev").click(function(evt) {
+                row_idx = Math.max(0, row_idx - 1);
+                reload_board();
+            })
+            $("#next").click(function(evt) {
+                row_idx = Math.min(ROWS.length - 1, row_idx + 1);
+                reload_board();
+            })
+
+            $("#cards td").click(function(evt) {
+                var card = $(this).attr("id").substring("cards-r".length).split('c');
+                suit_idx = parseInt(card[0]);
+                rank_idx = parseInt(card[1]);
+                reload_board();
+            })
+
+            reload_board();
+        });
+    </script>
+</head>
+
+<body>
+    <h1>Cards dists</h1>
+
+    <p>
+        <a href="#" id='prev'>Previous &lt;</a>
+        <span id="row_idx">1</span> of <span id="num_rows">N</span>
+        <a href="#" id='next'>&gt; Next</a>
+    </p>
+
+    <div id="utt">
+    </div>
+
+    <div id="cards">
+    </div>
+
+    <div id="board">
+    </div>
+</body>
+</html>
