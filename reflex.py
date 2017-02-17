@@ -105,7 +105,6 @@ class ReflexListener(TensorflowLearner):
         self.init_vectorizers(training_instances)
 
         self.build_graph()
-        self.session = tf.Session(graph=self.graph)
         self.init_params()
 
         batches = iterators.gen_batches(training_instances,
