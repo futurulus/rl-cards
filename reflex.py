@@ -26,10 +26,60 @@ parser.add_argument('--unk_threshold', type=int, default=1,
                     help='Maximum number of occurrences for a token to occur in training '
                          'and still be counted as an unknown word (<unk>).')
 
+parser.add_argument('--learning_rate', type=float, default=0.1,
+                    help='The learning rate for neural sequence model training.')
 parser.add_argument('--embedding_size', type=int, default=128,
                     help='The dimensionality of word embeddings in neural sequence models.')
 parser.add_argument('--num_rnn_units', type=int, default=128,
                     help='The dimensionality of the RNN state in neural sequence models.')
+
+
+def trace_nans(op, session, feed_dict, indent=0, seen=None):
+    if seen is None:
+        seen = set()
+
+    if id(op) in seen:
+        return
+
+    seen.add(id(op))
+
+    try:
+        inputs = list(op.inputs)
+    except NameError:
+        inputs = []
+
+    if not inputs:
+        return
+
+    for inp in inputs:
+        try:
+            val = session.run(inp, feed_dict=feed_dict)
+            tag = ''
+        except Exception:
+            val = np.array([-float('inf')])
+            tag = ' <not fetchable>'
+
+        try:
+            good = np.isfinite(val).all()
+            if good:
+                tag += ' <good>'
+            else:
+                tag += ' <bad!>'
+        except TypeError:
+            good = None
+            tag += ' <finite? {}>'.format(val.dtype)
+
+        if val is not None and good == True:
+            if 'fetch' not in tag:
+                print(' ' * indent + inp.name + tag)
+        else:
+            child_op = inp._op
+            if 'fetch' in tag:
+                new_indent = indent
+            else:
+                print(' ' * indent + inp.name + tag)
+                new_indent = indent + 1
+            trace_nans(child_op, session, feed_dict, indent=new_indent, seen=seen)
 
 
 class UniformListener(Learner):
@@ -187,7 +237,7 @@ class ReflexListener(TensorflowLearner):
         num_locs = np.prod(cards_env.MAX_BOARD_SIZE)
 
         cell = tf.contrib.rnn.LSTMBlockCell(num_units=self.options.num_rnn_units,
-                                            use_peephole=True)
+                                            use_peephole=False)
 
         embeddings = tf.Variable(tf.random_uniform([self.seq_vec.num_types,
                                                     self.options.embedding_size], -1.0, 1.0),
@@ -213,7 +263,7 @@ class ReflexListener(TensorflowLearner):
 
         walls_mask = tf.reshape(tf.where(walls <= 0.5,
                                          tf.zeros_like(walls),
-                                         -1000.0 * tf.ones_like(walls),
+                                         -44.0 * tf.ones_like(walls),
                                          name='walls_mask_2d'),
                                 [-1, num_locs], name='walls_mask')
 
@@ -223,7 +273,7 @@ class ReflexListener(TensorflowLearner):
 
         cards_mask = tf.reshape(tf.where(tf.abs(cards) > 0.5,
                                          tf.zeros_like(cards),
-                                         -1000.0 * tf.ones_like(cards),
+                                         -44.0 * tf.ones_like(cards),
                                          name='cards_mask_2d'),
                                 [-1, 1, num_locs], name='cards_mask')
         all_mask_board = tf.add(cards_mask, tf.expand_dims(walls_mask, 1), name='all_mask')
@@ -251,7 +301,7 @@ class ReflexListener(TensorflowLearner):
                               p2_loc_loss, name='loss')
 
         # Optimizer
-        opt = tf.train.RMSPropOptimizer(learning_rate=0.1)
+        opt = tf.train.RMSPropOptimizer(learning_rate=self.options.learning_rate)
         var_list = tf.trainable_variables()
         if self.options.verbosity >= 4:
             print('Trainable variables:')

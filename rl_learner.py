@@ -68,7 +68,7 @@ class TensorflowLearner(learner.Learner):
         self.graph = tf.Graph()
         with self.graph.as_default():
             self.input_vars, self.label_vars, self.train_op, self.predict_op = self.get_layers()
-            self.check_op = tf.add_check_numerics_ops()
+            self.check_op = tfutils.add_check_numerics_ops()
             if self.options.monitor_activations:
                 tfutils.add_summary_ops()
             self.summary_op = tf.summary.merge_all()
@@ -76,7 +76,8 @@ class TensorflowLearner(learner.Learner):
             self.saver = tf.train.Saver()
             self.run_metadata = tf.RunMetadata()
         # gpu_session(self.graph)
-        self.session = tf.Session(graph=self.graph)
+        config = tf.ConfigProto(device_count={'GPU': 0})
+        self.session = tf.Session(graph=self.graph, config=config)
 
     def run_train(self, feed_dict):
         self.step += 1
