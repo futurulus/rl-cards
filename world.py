@@ -1,4 +1,3 @@
-import copy
 import numpy as np
 
 from cards import cards
@@ -8,14 +7,17 @@ from cards_env import MAX_BOARD_SIZE
 class CardsWorld(object):
     def __init__(self, transcript, verbosity=0, apply_actions=False, event_limit=None):
         self.verbosity = verbosity
-        self.walls = [[1.0 for c in range(MAX_BOARD_SIZE[1])]
-                      for r in range(MAX_BOARD_SIZE[0])]
 
         self.p1_loc = (0, 0)
         self.p2_loc = (0, 0)
         self.cards_to_loc = {}
 
-        self.load_transcript(transcript, apply_actions=apply_actions, event_limit=event_limit)
+        if transcript:
+            self.walls = [[1.0 for c in range(MAX_BOARD_SIZE[1])]
+                          for r in range(MAX_BOARD_SIZE[0])]
+            self.load_transcript(transcript, apply_actions=apply_actions, event_limit=event_limit)
+        else:
+            self.walls = None
 
     def load_transcript(self, transcript, apply_actions, event_limit):
         for i, event in enumerate(transcript.iter_events()):
@@ -63,7 +65,7 @@ class CardsWorld(object):
             return False
 
     def swap_players(self):
-        swapped = copy.deepcopy(self)
+        swapped = self.copy()
         swapped.p1_loc, swapped.p2_loc = swapped.p2_loc, swapped.p1_loc
         swap = lambda loc: (cards.PLAYER2 if loc == cards.PLAYER1 else
                             cards.PLAYER1 if loc == cards.PLAYER2 else loc)
@@ -73,20 +75,21 @@ class CardsWorld(object):
         }
         return swapped
 
-
-class MockTranscript(object):
-    def iter_events(self):
-        return []
+    def copy(self):
+        other = CardsWorld(None)
+        other.p1_loc = self.p1_loc
+        other.p2_loc = self.p2_loc
+        other.walls = [list(r) for r in self.walls]
+        other.cards_to_loc = dict(self.cards_to_loc)
+        return other
 
 
 def build_world(walls, cards_to_loc, p1_loc=(1, 1), p2_loc=(1, 1), verbosity=0):
-    world = CardsWorld(MockTranscript())
-    for i, row in enumerate(walls):
-        for j, val in enumerate(row):
-            world.walls[i][j] = val
-    world.cards_to_loc = cards_to_loc
+    world = CardsWorld(None)
     world.p1_loc = p1_loc
     world.p2_loc = p2_loc
+    world.walls = [list(row) for row in walls]
+    world.cards_to_loc = dict(cards_to_loc)
     return world
 
 
@@ -96,10 +99,10 @@ def event_world_pairs(transcript, verbosity=0):
     world = CardsWorld(transcript, event_limit=eoi, verbosity=verbosity)
 
     event = transcript.events[eoi - 1]
-    pairs.append((event, copy.deepcopy(world)))
+    pairs.append((event, world.copy()))
     for event in transcript.events[eoi:]:
         world.apply_event(event)
-        pairs.append((event, copy.deepcopy(world)))
+        pairs.append((event, world.copy()))
     return pairs
 
 

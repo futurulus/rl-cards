@@ -1,5 +1,7 @@
 from collections import namedtuple
+import multiprocessing
 import numpy as np
+import sys
 
 from stanza.research.rng import config
 from stanza.research.instance import Instance
@@ -117,24 +119,28 @@ def dist():
             for _ in range(500)]
 
 
+def interpret_transcript(data):
+    transcript, options = data
+    insts = []
+    pairs = world.event_world_pairs(transcript)
+    for event, state in pairs:
+        if event.action == cards.UTTERANCE:
+            # Player 1 is always the listener, Player 2 is always the speaker
+            if event.agent == cards.PLAYER2:
+                state = state.swap_players()
+            insts.append(Instance(input={'utt': ['<s>'] + event.parse_contents() + ['</s>'],
+                                         'cards': world.build_cards_obs(state,
+                                                                        options.line_of_sight),
+                                         'walls': np.maximum(0.0, state.walls)},
+                                  output=state.__dict__))
+    return insts
+
+
 def interpret(transcripts):
     options = config.options()
-    insts = []
-    for i, trans in enumerate(transcripts):
-        if i % 100 == 0:
-            print(i)
-        pairs = world.event_world_pairs(trans)
-        for event, state in pairs:
-            if event.action == cards.UTTERANCE:
-                # Player 1 is always the listener, Player 2 is always the speaker
-                if event.agent == cards.PLAYER2:
-                    state = state.swap_players()
-                insts.append(Instance(input={'utt': ['<s>'] + event.parse_contents() + ['</s>'],
-                                             'cards': world.build_cards_obs(state,
-                                                                            options.line_of_sight),
-                                             'walls': np.maximum(0.0, state.walls)},
-                                      output=state.__dict__))
-    return insts
+    pool = multiprocessing.Pool(8)
+    by_trans = pool.map(interpret_transcript, ((t, options) for t in transcripts))
+    return [inst for t in by_trans for inst in t]
 
 
 def interpret_train():
