@@ -34,6 +34,9 @@ parser.add_argument('--num_rnn_units', type=int, default=128,
                     help='The dimensionality of the RNN state in neural sequence models.')
 
 
+NUM_LOCS = np.prod(cards_env.MAX_BOARD_SIZE)
+
+
 def trace_nans(op, session, feed_dict, indent=0, seen=None):
     if seen is None:
         seen = set()
@@ -69,7 +72,7 @@ def trace_nans(op, session, feed_dict, indent=0, seen=None):
             good = None
             tag += ' <finite? {}>'.format(val.dtype)
 
-        if val is not None and good == True:
+        if val is not None and good is True:
             if 'fetch' not in tag:
                 print(' ' * indent + inp.name + tag)
         else:
@@ -80,6 +83,15 @@ def trace_nans(op, session, feed_dict, indent=0, seen=None):
                 print(' ' * indent + inp.name + tag)
                 new_indent = indent + 1
             trace_nans(child_op, session, feed_dict, indent=new_indent, seen=seen)
+
+
+TRAIN_EVENTS = 272879
+ACTION_DIST = {
+    world.cards.MOVE: 224163. / TRAIN_EVENTS,
+    world.cards.UTTERANCE: 27455. / TRAIN_EVENTS,
+    world.cards.PICKUP: 11316. / TRAIN_EVENTS,
+    world.cards.DROP: 7183. / TRAIN_EVENTS,
+}
 
 
 class UniformListener(Learner):
@@ -234,8 +246,6 @@ class ReflexListener(TensorflowLearner):
         input_vars = [walls, cards, utt, utt_len]
 
         # Hidden layers
-        num_locs = np.prod(cards_env.MAX_BOARD_SIZE)
-
         cell = tf.contrib.rnn.LSTMBlockCell(num_units=self.options.num_rnn_units,
                                             use_peephole=False)
 
@@ -256,18 +266,15 @@ class ReflexListener(TensorflowLearner):
                                                    dtype=tf.float32)
         encoder_state = tf.concat(1, encoder_state_tuple)
 
-        fc = tf.contrib.layers.fully_connected
-        with tf.variable_scope('hidden'):
-            hidden = fc(encoder_state, trainable=True, activation_fn=tf.identity,
-                        num_outputs=num_locs + 52 * (num_locs + 2))
+        full_linear = self.state_to_linear_dist(encoder_state)
 
         walls_mask = tf.reshape(tf.where(walls <= 0.5,
                                          tf.zeros_like(walls),
                                          -44.0 * tf.ones_like(walls),
                                          name='walls_mask_2d'),
-                                [-1, num_locs], name='walls_mask')
+                                [-1, NUM_LOCS], name='walls_mask')
 
-        p2_loc_linear = tf.slice(hidden, [0, 0], [-1, num_locs], name='p2_loc_linear')
+        p2_loc_linear = tf.slice(full_linear, [0, 0], [-1, NUM_LOCS], name='p2_loc_linear')
         p2_loc_masked = tf.add(p2_loc_linear, walls_mask, name='p2_loc_masked')
         p2_loc_dist = tf.nn.log_softmax(p2_loc_masked, name='p2_loc_dist')
 
@@ -275,14 +282,14 @@ class ReflexListener(TensorflowLearner):
                                          tf.zeros_like(cards),
                                          -44.0 * tf.ones_like(cards),
                                          name='cards_mask_2d'),
-                                [-1, 1, num_locs], name='cards_mask')
+                                [-1, 1, NUM_LOCS], name='cards_mask')
         all_mask_board = tf.add(cards_mask, tf.expand_dims(walls_mask, 1), name='all_mask')
         mask_special_cols = tf.zeros_like(tf.slice(cards_mask, [0, 0, 0], [-1, -1, 2]),
                                           name='mask_special_cols')
         all_mask = tf.concat(2, [mask_special_cols, all_mask_board], name='all_mask')
 
-        card_loc_linear = tf.slice(hidden, [0, num_locs], [-1, -1], name='card_loc_linear')
-        card_loc_rows = tf.reshape(card_loc_linear, [-1, 52, num_locs + 2], name='card_loc_rows')
+        card_loc_linear = tf.slice(full_linear, [0, NUM_LOCS], [-1, -1], name='card_loc_linear')
+        card_loc_rows = tf.reshape(card_loc_linear, [-1, 52, NUM_LOCS + 2], name='card_loc_rows')
         card_loc_masked = tf.add(card_loc_rows, all_mask, name='card_loc_masked')
         card_loc_dist = tf.nn.log_softmax(card_loc_masked, name='card_loc_dist')
 
@@ -312,6 +319,13 @@ class ReflexListener(TensorflowLearner):
 
         return input_vars, label_vars, train_op, predict_op
 
+    def state_to_linear_dist(self, encoder_state):
+        fc = tf.contrib.layers.fully_connected
+        with tf.variable_scope('hidden'):
+            hidden = fc(encoder_state, trainable=True, activation_fn=tf.identity,
+                        num_outputs=NUM_LOCS + 52 * (NUM_LOCS + 2))
+        return hidden
+
     def vectorize_inputs(self, batch):
         walls = np.array([inst.input['walls'] for inst in batch])
         cards = np.array([inst.input['cards'] for inst in batch])
@@ -335,11 +349,10 @@ class ReflexListener(TensorflowLearner):
     def output_to_preds(self, output, batch):
         card_names = [rank + suit for rank in cards_env.RANKS for suit in cards_env.SUITS]
         num_cards = len(card_names)
-        num_locs = np.prod(cards_env.MAX_BOARD_SIZE)
         card_loc_rows, p2_loc = output
 
-        assert card_loc_rows.shape[1:] == (num_cards, num_locs + 2), card_loc_rows.shape
-        assert p2_loc.shape[1:] == (num_locs,), card_loc_rows.shape
+        assert card_loc_rows.shape[1:] == (num_cards, NUM_LOCS + 2), card_loc_rows.shape
+        assert p2_loc.shape[1:] == (NUM_LOCS,), card_loc_rows.shape
 
         with gzip.open(config.get_file_path('dists.b64.gz'), 'a') as outfile:
             for row in summarize_output(card_loc_rows, p2_loc):
@@ -372,6 +385,47 @@ class ReflexListener(TensorflowLearner):
             p2_loc_scores.shape
         result = card_loc_scores.sum(axis=1) + p2_loc_scores
         return [float(s) for s in result]
+
+
+class FactoredReflexListener(ReflexListener):
+    def state_to_linear_dist(self, encoder_state):
+        fc = tf.contrib.layers.fully_connected
+        with tf.variable_scope('referent'):
+            ref = fc(encoder_state, trainable=True, activation_fn=tf.identity,
+                     num_outputs=53)
+        with tf.variable_scope('loc'):
+            loc = fc(encoder_state, trainable=True, activation_fn=tf.identity,
+                     num_outputs=NUM_LOCS + 2)
+
+        # log(x + y) = log((x/y + 1)*y) = softplus(log(x/y)) + log(y)
+        #                               = softplus(log(x) - log(y)) + log(y)
+        # log(sigmoid(x)) = log(1/(1 + exp(-x))) = -log(1 + exp(-x)) = -softplus(-x)
+        # softplus(x) - softplus(-x) = log(exp(x) + 1) - log(exp(-x) + 1)
+        #                            = log(exp(x) + 1) - (-x) - log(1 + exp(x)) = x
+        #
+        #     Let x = sigmoid(ref) * softmax(loc), y = sigmoid(-ref) * 1/(NUM_LOCS+2).
+        #     => log(x) = log(sigmoid(ref) * softmax(loc)) = -softplus(-ref) + log_softmax(loc),
+        #        log(y) = log(sigmoid(-ref) / (NUM_LOCS+2)) = -softplus(ref) - log(NUM_LOCS+2)
+        #
+        # log(sigmoid(ref) * softmax(loc) + sigmoid(-ref) * 1/(NUM_LOCS+2)) =
+        #      softplus(log_softmax(loc) + softplus(ref) - softplus(-ref) + log(NUM_LOCS+2)) -
+        #              softplus(ref) - log(NUM_LOCS+2) =
+        #      softplus(log_softmax(loc) + ref + log(NUM_LOCS+2)) - softplus(ref) - log(NUM_LOCS+2)
+        ref_expanded = tf.expand_dims(ref, 2)
+        loc_expanded = tf.expand_dims(loc, 1)
+        log_maxent = tf.mul(np.log(1. / (NUM_LOCS + 2), dtype=np.float32),
+                            tf.ones_like(loc_expanded),
+                            name='log_maxent')
+        big_softplus = tf.nn.softplus(tf.nn.log_softmax(loc_expanded) + ref_expanded - log_maxent,
+                                      name='big_softplus')
+        small_softplus = tf.nn.softplus(ref_expanded, name='small_softplus')
+        product = tf.sub(big_softplus, small_softplus - log_maxent, name='product')
+
+        p2_row = tf.squeeze(tf.slice(product, [0, 0, 0], [-1, 1, NUM_LOCS]), 1, name='p2_row')
+        cards_row = tf.reshape(tf.slice(product, [0, 1, 0], [-1, -1, -1]),
+                               [-1, 52 * (NUM_LOCS + 2)], name='cards_row')
+
+        return tf.concat(1, [p2_row, cards_row], name='linear_dist_concat')
 
 
 def loc_index_to_coord(idx, card=False):
