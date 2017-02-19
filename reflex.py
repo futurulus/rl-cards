@@ -510,10 +510,10 @@ def quantize(row):
     '''
     row = np.copy(row)
     row[row <= -30.0] = float('nan')
-    lower, upper = np.nanmin(row), np.nanmax(row)
+    lower, upper = -14.0, 0.0  # np.nanmin(row), np.nanmax(row)
     result = np.zeros(row.shape, dtype=np.int)
     offsets = (row[np.isfinite(row)] - lower) / (upper - lower)
-    result[np.isfinite(row)] = np.minimum((offsets * 7.0 + 1.0).astype(np.int), 7)
+    result[np.isfinite(row)] = np.clip((offsets * 7.0 + 1.0).astype(np.int), 1, 7)
     return result
 
 
