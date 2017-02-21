@@ -303,7 +303,9 @@ class ReflexListener(TensorflowLearner):
 
         # Loss function
         xent = tf.nn.sparse_softmax_cross_entropy_with_logits
-        card_loc_loss = xent(card_loc_masked, true_card_loc, name='card_loc_loss')
+        card_loc_loss = tf.where(tf.equal(true_card_loc, 0),
+                                 tf.zeros_like(true_card_loc, dtype=card_loc_masked.dtype),
+                                 xent(card_loc_masked, true_card_loc, name='card_loc_loss'))
         p2_loc_loss = xent(p2_loc_masked, true_p2_loc, name='p2_loc_loss')
         loss = tf.reduce_mean(tf.reduce_sum(card_loc_loss, 1, name='card_loc_loss_sum') +
                               p2_loc_loss, name='loss')

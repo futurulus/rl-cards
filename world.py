@@ -64,13 +64,25 @@ class CardsWorld(object):
         else:
             return False
 
-    def swap_players(self):
+    def line_of_sight(self, los=None, swap_players=False):
+        '''
+        If `swap_players` is True, then reorient the world from the opposite player's perspective
+        (so cards held by Player 2 become held by Player 1, Player 2's location becomes Player 1's
+        location, and so on).
+
+        Then replace all cards that are out of Player 2's line of sight (including those held by
+        Player 1) with a location of None.
+        '''
         swapped = self.copy()
-        swapped.p1_loc, swapped.p2_loc = swapped.p2_loc, swapped.p1_loc
-        swap = lambda loc: (cards.PLAYER2 if loc == cards.PLAYER1 else
-                            cards.PLAYER1 if loc == cards.PLAYER2 else loc)
+        if swap_players:
+            swapped.p1_loc, swapped.p2_loc = swapped.p2_loc, swapped.p1_loc
+            swap = lambda loc: (cards.PLAYER2 if loc == cards.PLAYER1 else
+                                cards.PLAYER1 if loc == cards.PLAYER2 else loc)
+        else:
+            swap = lambda loc: loc
+        hide = lambda loc: (loc if in_line_of_sight(swap(loc), swapped.p2_loc, los) else None)
         swapped.cards_to_loc = {
-            card: swap(loc)
+            card: hide(swap(loc))
             for card, loc in swapped.cards_to_loc.iteritems()
         }
         return swapped
@@ -82,6 +94,17 @@ class CardsWorld(object):
         other.walls = [list(r) for r in self.walls]
         other.cards_to_loc = dict(self.cards_to_loc)
         return other
+
+
+def in_line_of_sight(card_loc, player_loc, los):
+    if isinstance(card_loc, basestring):
+        return card_loc == 'Player 2'
+    if los is None or los < 0:
+        return True
+
+    cr, cc = card_loc
+    pr, pc = player_loc
+    return pr - los <= cr <= pr + los and pc - los <= cc <= pc - los
 
 
 def build_world(walls, cards_to_loc, p1_loc=(1, 1), p2_loc=(1, 1), verbosity=0):

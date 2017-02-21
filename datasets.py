@@ -14,8 +14,11 @@ rng = get_rng()
 
 parser = config.get_options_parser()
 parser.add_argument('--line_of_sight', type=int, default=3,
-                    help='Maximum distance (Manhattan distance) from the player that a card is '
-                         'visible.')
+                    help='Maximum distance (Manhattan distance) from the listener that a card is '
+                         'visible. If negative, line of sight is infinite.')
+parser.add_argument('--line_of_sight_p2', type=int, default=-1,
+                    help='Maximum distance (Manhattan distance) from the speaker that a card is '
+                         'visible. If negative, line of sight is infinite.')
 parser.add_argument('--dist_num_rows', type=int, default=2,
                     help='Board height. Used only in "dist" data_source.')
 parser.add_argument('--dist_num_cols', type=int, default=1,
@@ -123,8 +126,8 @@ def interpret_transcript(data):
     for event, state in pairs:
         if event.action == cards.UTTERANCE:
             # Player 1 is always the listener, Player 2 is always the speaker
-            if event.agent == cards.PLAYER1:
-                state = state.swap_players()
+            state = state.line_of_sight(los=options.line_of_sight_p2,
+                                        swap_players=(event.agent == cards.PLAYER1))
             yield Instance(input={'utt': ['<s>'] + event.parse_contents() + ['</s>'],
                                   'cards': world.build_cards_obs(state,
                                                                  options.line_of_sight),
