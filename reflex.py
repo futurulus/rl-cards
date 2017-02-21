@@ -12,6 +12,7 @@ import tfutils
 import world
 import vectorizers
 from rl_learner import TensorflowLearner
+from html_dists import base64_char
 
 
 parser = config.get_options_parser()
@@ -481,9 +482,9 @@ def coord_to_loc_index(coord, card=False):
 def summarize_output(card_loc_rows, p2_loc):
     '''
     >>> summarize_output([
-    ...     [[-7.0, -8.0], [-50.0, -7.0]],
-    ...     [[-8.0, -7.0], [-50.0, -7.0]],
-    ... ], [[-8.0, -7.0], [-7.0, -8.0]])
+    ...     [[-1.0, -13.0], [-50.0, -1.0]],
+    ...     [[-13.0, -1.0], [-50.0, -1.0]],
+    ... ], [[-13.0, -1.0], [-1.0, -13.0]])
     ['v7F', 'F7v']
     '''
     # 71 07 17  17 07 71
@@ -505,8 +506,8 @@ def summarize_output(card_loc_rows, p2_loc):
 
 def quantize(row):
     '''
-    >>> quantize([-48.0, -7.0, -8.0, -9.0])
-    array([0, 7, 4, 1])
+    >>> quantize([-48.0, -7.0, -10.5, -5.0])
+    array([0, 4, 2, 5])
     '''
     row = np.copy(row)
     row[row <= -30.0] = float('nan')
@@ -515,26 +516,3 @@ def quantize(row):
     offsets = (row[np.isfinite(row)] - lower) / (upper - lower)
     result[np.isfinite(row)] = np.clip((offsets * 7.0 + 1.0).astype(np.int), 1, 7)
     return result
-
-
-def base64_char(n1, n2):
-    '''
-    0 through 9, A through Z, a through z, '.', '/'
-
-    >>> base64_char(7, 1)
-    'v'
-    >>> base64_char(1, 7)
-    'F'
-    >>> base64_char(0, 7)
-    '7'
-    '''
-    assert 0 <= n1 < 8 and 0 <= n2 < 8, (n1, n2)
-    combined = n1 * 8 + n2
-    if combined < 10:
-        return str(combined)
-    elif combined < 36:
-        return chr(ord('A') + (combined - 10))
-    elif combined < 62:
-        return chr(ord('a') + (combined - 36))
-    else:
-        return chr(ord('.') + (combined - 62))

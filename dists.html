@@ -55,6 +55,8 @@
             // $("#board").html("<p>" + ROWS[row_idx].length + "</p>");
             var board_array = generate_array(ROWS[row_idx], rank_idx, suit_idx);
             update_board_table(board_array);
+            var cards_array = generate_cards_array(ENTS[row_idx]);
+            update_cards_table(cards_array);
         }
 
         function generate_array(row, rank, suit) {
@@ -70,6 +72,15 @@
                 card_dist = row.substring(start, start + width_chars);
             }
             return extract_rows(card_dist);
+        }
+
+        function generate_cards_array(row) {
+            var result = [];
+            for(var suit = 0; suit < 4; suit++) {
+                result.push(row.slice(suit * RANKS.length, (suit + 1) * RANKS.length));
+            }
+            result.push([row[row.length - 1]]);
+            return result;
         }
 
         function card_name(rank, suit) {
@@ -167,9 +178,17 @@
             $("#cards-r" + suit_idx + "c" + rank_idx).addClass("selected");
             
             $(".board td").each(function() {
-                var coord = $(this).attr("id").substring("cards-r".length).split('c');
+                var coord = $(this).attr("id").substring("board-r".length).split('c');
                 var row = parseInt(coord[0]), col = parseInt(coord[1]);
                 $(this).css("background-color", heatmap_color(board[row][col]));
+            });
+        }
+
+        function update_cards_table(ents) {
+            $(".cards td").each(function() {
+                var coord = $(this).attr("id").substring("cards-r".length).split('c');
+                var row = parseInt(coord[0]), col = parseInt(coord[1]);
+                $(this).css("background-color", heatmap_color(ents[row][col]));
             });
         }
 
