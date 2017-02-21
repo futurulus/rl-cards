@@ -123,7 +123,7 @@ def interpret_transcript(data):
     for event, state in pairs:
         if event.action == cards.UTTERANCE:
             # Player 1 is always the listener, Player 2 is always the speaker
-            if event.agent == cards.PLAYER2:
+            if event.agent == cards.PLAYER1:
                 state = state.swap_players()
             yield Instance(input={'utt': ['<s>'] + event.parse_contents() + ['</s>'],
                                   'cards': world.build_cards_obs(state,
