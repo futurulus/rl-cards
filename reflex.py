@@ -421,7 +421,7 @@ class FactoredReflexListener(ReflexListener):
         small_softplus = tf.nn.softplus(ref_expanded, name='small_softplus')
         product = tf.sub(big_softplus, small_softplus - log_maxent, name='product')
 
-        p2_row = tf.squeeze(tf.slice(product, [0, 0, 0], [-1, 1, NUM_LOCS]), 1, name='p2_row')
+        p2_row = tf.squeeze(tf.slice(product, [0, 0, 2], [-1, 1, NUM_LOCS]), 1, name='p2_row')
         cards_row = tf.reshape(tf.slice(product, [0, 1, 0], [-1, -1, -1]),
                                [-1, 52 * (NUM_LOCS + 2)], name='cards_row')
 
