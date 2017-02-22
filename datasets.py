@@ -1,3 +1,4 @@
+import csv
 from collections import namedtuple
 import numpy as np
 
@@ -154,6 +155,19 @@ def interpret_test():
     return interpret(test_transcripts())
 
 
+def location():
+    insts = []
+    tokenizer = cards.Tokenizer()
+    with open('potts-wccfl30-supp/wccfl30-location-phrases.csv', 'r') as infile:
+        reader = csv.DictReader(infile)
+        for example in reader:
+            walls = world.walls_from_str(example['Map'])
+            insts.append(Instance(input={'utt': tokenizer.tokenize(example['Text']),
+                                         'walls': walls},
+                                  output=(int(example['X']), int(example['Y']))))
+    return insts
+
+
 DataSource = namedtuple('DataSource', ['train_data', 'test_data'])
 
 SOURCES = {
@@ -165,4 +179,5 @@ SOURCES = {
     'dist': DataSource(dist, dist),
     'interpret_dev': DataSource(interpret_train, interpret_dev),
     'interpret_test': DataSource(interpret_train, interpret_test),
+    'location': DataSource(location, location),
 }

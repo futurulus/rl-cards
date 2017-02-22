@@ -355,7 +355,7 @@ class ReflexListener(TensorflowLearner):
         card_loc_rows, p2_loc = output
 
         assert card_loc_rows.shape[1:] == (num_cards, NUM_LOCS + 2), card_loc_rows.shape
-        assert p2_loc.shape[1:] == (NUM_LOCS,), card_loc_rows.shape
+        assert p2_loc.shape[1:] == (NUM_LOCS,), p2_loc.shape
 
         with gzip.open(config.get_file_path('dists.b64.gz'), 'a') as outfile:
             for row in summarize_output(card_loc_rows, p2_loc):
@@ -383,7 +383,7 @@ class ReflexListener(TensorflowLearner):
                                         np.arange(true_card_loc.shape[1]), true_card_loc]
         assert card_loc_scores.shape == (card_loc_rows.shape[0], card_loc_rows.shape[1]), \
             card_loc_scores.shape
-        p2_loc_scores = p2_loc[np.arange(card_loc_rows.shape[0]), true_p2_loc]
+        p2_loc_scores = p2_loc[np.arange(p2_loc.shape[0]), true_p2_loc]
         assert p2_loc_scores.shape == (p2_loc.shape[0],), \
             p2_loc_scores.shape
         result = card_loc_scores.sum(axis=1) + p2_loc_scores
@@ -429,6 +429,95 @@ class FactoredReflexListener(ReflexListener):
                                [-1, 52 * (NUM_LOCS + 2)], name='cards_row')
 
         return tf.concat(1, [p2_row, cards_row], name='linear_dist_concat')
+
+
+class LocationListener(ReflexListener):
+    def get_layers(self):
+        # Inputs
+        walls = tf.placeholder(tf.float32, shape=(None,) + cards_env.MAX_BOARD_SIZE,
+                               name='walls')
+        utt = tf.placeholder(tf.int32, shape=(None, self.seq_vec.max_len),
+                             name='utt')
+        utt_len = tf.placeholder(tf.int32, shape=(None,), name='utt_len')
+        input_vars = [walls, utt, utt_len]
+
+        # Hidden layers
+        cell = tf.contrib.rnn.LSTMBlockCell(num_units=self.options.num_rnn_units,
+                                            use_peephole=False)
+
+        embeddings = tf.Variable(tf.random_uniform([self.seq_vec.num_types,
+                                                    self.options.embedding_size], -1.0, 1.0),
+                                 name='embeddings')
+
+        utt_embed = tf.nn.embedding_lookup(embeddings, utt)
+        _, encoder_state_tuple = tf.nn.dynamic_rnn(cell, utt_embed, sequence_length=utt_len,
+                                                   dtype=tf.float32)
+        encoder_state = tf.concat(1, encoder_state_tuple)
+
+        full_linear = self.state_to_linear_dist(encoder_state)
+
+        walls_mask = tf.reshape(tf.where(walls <= 0.5,
+                                         tf.zeros_like(walls),
+                                         -44.0 * tf.ones_like(walls),
+                                         name='walls_mask_2d'),
+                                [-1, NUM_LOCS], name='walls_mask')
+
+        p2_loc_linear = tf.slice(full_linear, [0, 0], [-1, NUM_LOCS], name='p2_loc_linear')
+        p2_loc_masked = tf.add(p2_loc_linear, walls_mask, name='p2_loc_masked')
+        p2_loc_dist = tf.nn.log_softmax(p2_loc_masked, name='p2_loc_dist')
+        predict_op = p2_loc_dist
+
+        # Labels
+        true_p2_loc = tf.placeholder(tf.int32, shape=(None,), name='true_p2_loc')
+        label_vars = [true_p2_loc]
+
+        # Loss function
+        xent = tf.nn.sparse_softmax_cross_entropy_with_logits
+        p2_loc_loss = xent(p2_loc_masked, true_p2_loc, name='p2_loc_loss')
+        loss = tf.reduce_mean(p2_loc_loss, name='loss')
+
+        # Optimizer
+        opt = tf.train.RMSPropOptimizer(learning_rate=self.options.learning_rate)
+        var_list = tf.trainable_variables()
+        if self.options.verbosity >= 4:
+            print('Trainable variables:')
+            for var in var_list:
+                print(var.name)
+        train_op = tfutils.minimize_with_grad_clip(opt, self.options.pg_grad_clip,
+                                                   loss, var_list=var_list)
+
+        return input_vars, label_vars, train_op, predict_op
+
+    def state_to_linear_dist(self, encoder_state):
+        fc = tf.contrib.layers.fully_connected
+        with tf.variable_scope('loc'):
+            loc = fc(encoder_state, trainable=True, activation_fn=tf.identity,
+                     num_outputs=NUM_LOCS + 2)
+        return loc
+
+    def vectorize_inputs(self, batch):
+        walls = np.array([inst.input['walls'] for inst in batch])
+        utt = self.seq_vec.vectorize_all([inst.input['utt'] for inst in batch])
+        utt_len = np.array([len(inst.input['utt']) for inst in batch])
+        return dict(zip(self.input_vars, [walls, utt, utt_len]))
+
+    def vectorize_labels(self, batch):
+        true_p2_loc = np.array([
+            coord_to_loc_index(inst.output)
+            for inst in batch
+        ])
+        return dict(zip(self.label_vars, [true_p2_loc]))
+
+    def output_to_preds(self, output, batch):
+        assert output.shape[1:] == (NUM_LOCS,), output.shape
+        p2_loc_indices = output.argmax(axis=1)
+        return [loc_index_to_coord(p2_loc_indices[i]) for i, inst in enumerate(batch)]
+
+    def output_to_scores(self, output, labels):
+        true_p2_loc = labels[self.label_vars[0]]
+        p2_loc_scores = output[np.arange(output.shape[0]), true_p2_loc]
+        assert p2_loc_scores.shape == (output.shape[0],), p2_loc_scores.shape
+        return [float(s) for s in p2_loc_scores]
 
 
 def loc_index_to_coord(idx, card=False):

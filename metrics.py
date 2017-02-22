@@ -1,6 +1,7 @@
 import numpy as np
 
 from stanza.research.metrics import log_likelihood
+from stanza.research.metrics import log_likelihood_bits, accuracy, perplexity  # NOQA
 
 
 def reward(*args, **kwargs):

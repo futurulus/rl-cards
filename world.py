@@ -28,20 +28,8 @@ class CardsWorld(object):
     def apply_event(self, event):
         if event.action == cards.ENVIRONMENT:
             board_info, card_info = event.contents.split('NEW_SECTION')
-            rows = board_info.split(';')[:-1]
-            for r, row in enumerate(rows):
-                if self.verbosity >= 4:
-                    print(row)
-                for c, col in enumerate(row):
-                    self.walls[r][c] = 1. if col == '-' else -1. if col == 'b' else 0.
-            card_locs = card_info.split(';')[:-1]
-            for card_loc in card_locs:
-                loc_str, card_str = card_loc.split(':')
-                loc = tuple(int(x) for x in loc_str.split(','))
-                assert len(loc) == 2, loc
-                self.cards_to_loc[card_str] = loc
-                if self.verbosity >= 4:
-                    print('%s: %s' % (loc, card_str))
+            self.walls = walls_from_str(board_info)
+            self.cards_to_loc = cards_from_str(card_info)
             return True
         elif event.action in (cards.INITIAL_LOCATION, cards.MOVE):
             loc = event.parse_contents()
@@ -105,6 +93,31 @@ def in_line_of_sight(card_loc, player_loc, los):
     cr, cc = card_loc
     pr, pc = player_loc
     return pr - los <= cr <= pr + los and pc - los <= cc <= pc - los
+
+
+def walls_from_str(board_info):
+    walls = []
+    rows = board_info.split(';')[:-1]
+    for r, row in enumerate(rows):
+        row_arr = []
+        for c, col in enumerate(row):
+            row_arr.append(1. if col == '-' else -1. if col == 'b' else 0.)
+        row_arr.extend([1.] * (MAX_BOARD_SIZE[1] - len(row_arr)))
+        walls.append(row_arr)
+    for _ in range(MAX_BOARD_SIZE[0] - len(walls)):
+        walls.append([1.] * MAX_BOARD_SIZE[1])
+    return walls
+
+
+def cards_from_str(card_info):
+    cards_to_loc = {}
+    card_locs = card_info.split(';')[:-1]
+    for card_loc in card_locs:
+        loc_str, card_str = card_loc.split(':')
+        loc = tuple(int(x) for x in loc_str.split(','))
+        assert len(loc) == 2, loc
+        cards_to_loc[card_str] = loc
+    return cards_to_loc
 
 
 def build_world(walls, cards_to_loc, p1_loc=(1, 1), p2_loc=(1, 1), verbosity=0):

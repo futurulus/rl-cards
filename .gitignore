@@ -9,6 +9,7 @@ activate
 
 # Data files
 cards
+potts-wccfl30-supp
 
 # Output directories
 runs/

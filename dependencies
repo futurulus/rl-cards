@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 
 echo 'Installing dependencies...'
-pip install ConfigArgParse 'pyhocon==0.3.18' pypng 'Protobuf>=3.0.0b2' python-Levenshtein
+pip -q install ConfigArgParse 'pyhocon==0.3.18' pypng 'Protobuf>=3.0.0b2' python-Levenshtein
 
 if [ ! -e tensorflow ]; then
     echo 'Checking for tensorboard protos...'
@@ -13,7 +13,7 @@ if [ ! -e tensorflow ]; then
     )
 fi
 
-pip install gym
+pip -q install gym
 
 if [ ! -e cards ]; then
     echo 'Downloading cards corpus...'
@@ -21,7 +21,15 @@ if [ ! -e cards ]; then
     unzip CardsCorpus-v02.zip
     mv CardsCorpus-v02 cards
     touch cards/__init__.py
+    rm CardsCorpus-v02.zip
+fi
+
+if [ ! -e potts-wccfl30-supp ]; then
+    echo 'Downloading WCCFL supplement...'
+    curl -O http://cardscorpus.christopherpotts.net/papers/potts-wccfl30-supp.zip
+    unzip potts-wccfl30-supp.zip
+    rm potts-wccfl30-supp.zip
 fi
 
 echo 'Installing testing modules (optional)...'
-pip install nose nose-exclude coverage mock
+pip -q install nose nose-exclude coverage mock
