@@ -510,6 +510,14 @@ class LocationListener(ReflexListener):
 
     def output_to_preds(self, output, batch):
         assert output.shape[1:] == (NUM_LOCS,), output.shape
+
+        with gzip.open(config.get_file_path('dists.b64.gz'), 'a') as outfile:
+            for row in summarize_output(np.zeros((output.shape[0],
+                                                  52, NUM_LOCS + 2)),
+                                        output):
+                outfile.write(row)
+                outfile.write('\n')
+
         p2_loc_indices = output.argmax(axis=1)
         return [loc_index_to_coord(p2_loc_indices[i]) for i, inst in enumerate(batch)]
 
