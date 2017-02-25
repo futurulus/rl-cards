@@ -278,9 +278,10 @@ def dynamic_rnn_decoder(cell, decoder_fn, inputs=None, sequence_lengths=None,
                     emit_output, next_loop_state)
 
         # Run raw_rnn function
-        outputs_ta, state, _ = tf.rnn.raw_rnn(
+        outputs_ta, state, _ = tf.nn.raw_rnn(
             cell, loop_fn, parallel_iterations=parallel_iterations,
-            swap_memory=swap_memory, scope=scope)
+            swap_memory=swap_memory, scope=scope
+        )
         outputs = outputs_ta.pack()
 
         if not time_major:
@@ -297,13 +298,13 @@ def simple_decoder_fn_inference(output_fn, encoder_state, embeddings,
                        [output_fn, encoder_state, embeddings,
                         start_of_sequence_id, end_of_sequence_id,
                         maximum_length, num_decoder_symbols, dtype]):
-        if type(encoder_state) is not tf.rnn_cell.LSTMStateTuple:
+        if not isinstance(encoder_state, tuple):
             encoder_state = tf.convert_to_tensor(encoder_state)
         start_of_sequence_id = tf.convert_to_tensor(start_of_sequence_id, dtype)
         end_of_sequence_id = tf.convert_to_tensor(end_of_sequence_id, dtype)
         maximum_length = tf.convert_to_tensor(maximum_length, dtype)
         num_decoder_symbols = tf.convert_to_tensor(num_decoder_symbols, dtype)
-        encoder_info = tf.flatten(encoder_state)[0]
+        encoder_info = encoder_state[0] if isinstance(encoder_state, tuple) else encoder_state
         batch_size = encoder_info.get_shape()[0].value
         if output_fn is None:
             output_fn = lambda x: x
@@ -336,5 +337,5 @@ def simple_decoder_fn_inference(output_fn, encoder_state, embeddings,
                 tf.greater(time, maximum_length),
                 lambda: tf.ones([batch_size], dtype=tf.bool),
                 lambda: done)
-            return (done, cell_state, next_input, next_input_id, context_state)
+            return (done, cell_state, next_input, cell_output, context_state)
     return decoder_fn
