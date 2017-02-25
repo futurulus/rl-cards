@@ -155,17 +155,50 @@ def interpret_test():
     return interpret(test_transcripts())
 
 
-def location():
+def location_insts(start=None, end=None, listener=True):
     insts = []
     tokenizer = cards.Tokenizer()
     with open('potts-wccfl30-supp/wccfl30-location-phrases.csv', 'r') as infile:
         reader = csv.DictReader(infile)
-        for example in reader:
-            walls = world.walls_from_str(example['Map'])
-            insts.append(Instance(input={'utt': tokenizer.tokenize(example['Text']),
-                                         'walls': walls},
-                                  output=(int(example['X']), int(example['Y']))))
+        examples = list(reader)[start:end]
+    for example in examples:
+        walls = world.walls_from_str(example['Map'])
+        utt = ['<s>'] + tokenizer.tokenize(example['Text']) + ['</s>']
+        loc = (int(example['X']), int(example['Y']))
+        if listener:
+            inst = Instance(input={'utt': utt, 'walls': walls}, output=loc)
+        else:
+            inst = Instance(input={'loc': loc, 'walls': walls}, output=utt)
+        insts.append(inst)
     return insts
+
+
+def location_l_all():
+    return location_insts()
+
+
+def location_l_train():
+    return location_insts(end=400)
+
+
+def location_l_dev():
+    return location_insts(400, 500)
+
+
+def location_l_test():
+    return location_insts(start=500)
+
+
+def location_s_train():
+    return location_insts(end=400, listener=False)
+
+
+def location_s_dev():
+    return location_insts(400, 500, listener=False)
+
+
+def location_s_test():
+    return location_insts(start=500, listener=False)
 
 
 DataSource = namedtuple('DataSource', ['train_data', 'test_data'])
@@ -179,5 +212,9 @@ SOURCES = {
     'dist': DataSource(dist, dist),
     'interpret_dev': DataSource(interpret_train, interpret_dev),
     'interpret_test': DataSource(interpret_train, interpret_test),
-    'location': DataSource(location, location),
+    'location': DataSource(location_l_all, location_l_all),
+    'location_l_dev': DataSource(location_l_train, location_l_dev),
+    'location_l_test': DataSource(location_l_train, location_l_test),
+    'location_s_dev': DataSource(location_s_train, location_s_dev),
+    'location_s_test': DataSource(location_s_train, location_s_test),
 }

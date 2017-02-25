@@ -2,6 +2,7 @@ import argparse
 import gzip
 import numpy as np
 import tensorflow as tf
+s2s = tf.nn.seq2seq
 
 from stanza.monitoring import progress
 from stanza.research import config, iterators
@@ -217,8 +218,9 @@ class ReflexListener(TensorflowLearner):
 
             batch = list(batch)
 
-            inputs = self.vectorize_inputs(batch)
-            output = self.session.run(self.predict_op, feed_dict=inputs)
+            feed_dict = self.vectorize_inputs(batch)
+            feed_dict.update(self.vectorize_labels(batch))
+            output = self.session.run(self.predict_op, feed_dict)
             predictions_batch = self.output_to_preds(output, batch)
             predictions.extend(predictions_batch)
             labels = self.vectorize_labels(batch)
@@ -528,6 +530,124 @@ class LocationListener(ReflexListener):
         return [float(s) for s in p2_loc_scores]
 
 
+class LocationSpeaker(ReflexListener):
+    def get_layers(self):
+        # Inputs
+        maxlen = self.seq_vec.max_len
+        p2_loc = tf.placeholder(tf.int32, shape=(None,), name='p2_loc')
+        input_vars = [p2_loc]
+
+        # Hidden layers
+        loc_embeddings = tf.Variable(tf.random_uniform([NUM_LOCS, self.options.embedding_size],
+                                                       -1.0, 1.0),
+                                     name='loc_embeddings')
+        loc_embed = tf.nn.embedding_lookup(loc_embeddings, p2_loc)
+
+        cell = tf.contrib.rnn.LSTMBlockCell(num_units=self.options.num_rnn_units,
+                                            use_peephole=False)
+
+        # Labels
+        true_utt = tf.placeholder(tf.int32, shape=(None, maxlen),
+                                  name='true_utt')
+        true_utt_len = tf.placeholder(tf.int32, shape=(None,), name='true_utt_len')
+        true_utt_reduced = tf.slice(true_utt, [0, 0], [-1, tf.reduce_max(true_utt_len)])
+
+        utt_prev = tf.slice(true_utt_reduced, [0, 0], [-1, tf.shape(true_utt_reduced)[1] - 1])
+        utt_next = tf.slice(true_utt_reduced, [0, 1], [-1, -1])
+
+        label_vars = [true_utt, true_utt_len]
+
+        # Decoder
+        fc = tf.contrib.layers.fully_connected
+        with tf.variable_scope('decoder') as varscope:
+            embeddings = tf.Variable(tf.random_uniform([self.seq_vec.num_types,
+                                                        self.options.embedding_size], -1.0, 1.0),
+                                     name='embedding')
+
+            output_fn = lambda x: fc(x, trainable=True, activation_fn=tf.identity,
+                                     num_outputs=self.seq_vec.num_types,
+                                     scope=varscope)
+
+            '''
+            decoder_train = s2s.simple_decoder_fn_train(loc_embed, name='decoder_train')
+            outputs, _, _ = s2s.dynamic_rnn_decoder(cell, prev_embed, sequence_length=true_utt_len,
+                                                    decoder_fn=decoder_train)
+            '''
+            utt_embed = tf.nn.embedding_lookup(embeddings, utt_prev)
+            outputs, _ = tf.nn.dynamic_rnn(cell, utt_embed, sequence_length=true_utt_len,
+                                           dtype=tf.float32)
+            print('outputs: {}'.format(outputs))
+            next_word_logits = output_fn(outputs)
+
+            varscope.reuse_variables()
+            decoder_predict = tfutils.simple_decoder_fn_inference(
+                output_fn, (loc_embed, loc_embed), embeddings,
+                self.seq_vec.token_indices['<s>'], self.seq_vec.token_indices['</s>'],
+                self.seq_vec.max_len, self.seq_vec.num_types,
+                name='decoder_train'
+            )
+            predict_outputs, _ = tfutils.dynamic_rnn_decoder(cell, sequence_lengths=true_utt_len,
+                                                             decoder_fn=decoder_predict)
+            predictions = tf.argmax(predict_outputs, 2, name='predictions')
+            print('predictions: {}'.format(predictions))
+
+        # Scoring
+        # http://r2rt.com/recurrent-neural-networks-in-tensorflow-iii-variable-length-sequences.html
+        lower_triangular_ones = tf.constant(np.tril(np.ones([maxlen, maxlen])), dtype=tf.float32)
+        seqlen_mask = tf.slice(tf.gather(lower_triangular_ones, true_utt_len - 1),
+                               [0, 0], [-1, tf.shape(utt_next)[1]])
+
+        xent = tf.nn.sparse_softmax_cross_entropy_with_logits
+        per_token_loss = xent(next_word_logits, utt_next, name='per_token_loss')
+        scores = tf.reduce_sum(per_token_loss * seqlen_mask, 1, name='scores')
+        predict_op = (-scores, predictions)
+
+        # Loss function
+        loss = tf.reduce_mean(scores, name='sequence_loss')
+
+        # Optimizer
+        opt = tf.train.RMSPropOptimizer(learning_rate=self.options.learning_rate)
+        var_list = tf.trainable_variables()
+        if self.options.verbosity >= 4:
+            print('Trainable variables:')
+            for var in var_list:
+                print(var.name)
+        train_op = tfutils.minimize_with_grad_clip(opt, self.options.pg_grad_clip,
+                                                   loss, var_list=var_list)
+
+        # Test-time prediction
+
+        return input_vars, label_vars, train_op, predict_op
+
+    def init_vectorizers(self, training_instances):
+        unk_threshold = self.options.unk_threshold
+        self.seq_vec = vectorizers.SequenceVectorizer(unk_threshold=unk_threshold)
+        self.seq_vec.add_all(inst.output for inst in training_instances)
+
+    def state_to_linear_dist(self, encoder_state):
+        assert False, "This shouldn't be called"
+
+    def vectorize_inputs(self, batch):
+        loc = np.array([
+            coord_to_loc_index(inst.input['loc'])
+            for inst in batch
+        ])
+        return dict(zip(self.input_vars, [loc]))
+
+    def vectorize_labels(self, batch):
+        utt = self.seq_vec.vectorize_all([inst.output for inst in batch])
+        utt_len = np.array([len(inst.output) for inst in batch])
+        return dict(zip(self.label_vars, [utt, utt_len]))
+
+    def output_to_preds(self, output, batch):
+        _, predictions = output
+        return sanitize_preds(self.seq_vec.unvectorize_all(predictions))
+
+    def output_to_scores(self, output, labels):
+        scores, _ = output
+        return [float(s) for s in scores]
+
+
 def loc_index_to_coord(idx, card=False):
     '''
     >>> loc_index_to_coord(37, card=False)  # 37 = 1 * 34 + 3
@@ -614,4 +734,29 @@ def quantize(row):
     result = np.zeros(row.shape, dtype=np.int)
     offsets = (row[np.isfinite(row)] - lower) / (upper - lower)
     result[np.isfinite(row)] = np.clip((offsets * 7.0 + 1.0).astype(np.int), 1, 7)
+    return result
+
+
+def sanitize_preds(preds):
+    return [sanitize_pred(p) for p in preds]
+
+
+def sanitize_pred(p):
+    '''
+    >>> sanitize_pred(['top', 'left', '</s>', '<unk>'])
+    ['<s>', 'top', 'left', '</s>']
+    >>> sanitize_pred(['<s>', 'in', 'the', 'corner'])
+    ['<s>', 'in', 'the', 'corner', '</s>']
+    >>> sanitize_pred(['<s>', 'top', '<s>', 'left', '<MASK>', '</s>', 'corner', '<MASK>'])
+    ['<s>', 'top', 'left', '</s>']
+    '''
+    result = ['<s>']
+    start = (1 if p and p[0] == '<s>' else 0)
+    for token in p[start:]:
+        if token not in ['<MASK>', '<s>']:
+            result.append(token)
+        if token == '</s>':
+            break
+    if result[-1] != '</s>':
+        result.append('</s>')
     return result
