@@ -538,7 +538,7 @@ class LocationSpeaker(ReflexListener):
         input_vars = [p2_loc]
 
         # Hidden layers
-        loc_embeddings = tf.Variable(tf.random_uniform([NUM_LOCS, self.options.embedding_size],
+        loc_embeddings = tf.Variable(tf.random_uniform([NUM_LOCS, self.options.num_rnn_units],
                                                        -1.0, 1.0),
                                      name='loc_embeddings')
         loc_embed = tf.nn.embedding_lookup(loc_embeddings, p2_loc)
@@ -583,7 +583,7 @@ class LocationSpeaker(ReflexListener):
             decoder_predict = tfutils.simple_decoder_fn_inference(
                 output_fn, (loc_embed, loc_embed), embeddings,
                 self.seq_vec.token_indices['<s>'], self.seq_vec.token_indices['</s>'],
-                self.seq_vec.max_len, self.seq_vec.num_types,
+                self.seq_vec.max_len, self.options.num_rnn_units,
                 name='decoder_train'
             )
             predict_outputs, _ = tfutils.dynamic_rnn_decoder(cell, sequence_lengths=true_utt_len,

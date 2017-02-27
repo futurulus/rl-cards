@@ -292,18 +292,18 @@ def dynamic_rnn_decoder(cell, decoder_fn, inputs=None, sequence_lengths=None,
 
 def simple_decoder_fn_inference(output_fn, encoder_state, embeddings,
                                 start_of_sequence_id, end_of_sequence_id,
-                                maximum_length, num_decoder_symbols,
+                                maximum_length, cell_size,
                                 dtype=tf.int32, name=None):
     with tf.name_scope(name, "simple_decoder_fn_inference",
                        [output_fn, encoder_state, embeddings,
                         start_of_sequence_id, end_of_sequence_id,
-                        maximum_length, num_decoder_symbols, dtype]):
+                        maximum_length, cell_size, dtype]):
         if not isinstance(encoder_state, tuple):
             encoder_state = tf.convert_to_tensor(encoder_state)
         start_of_sequence_id = tf.convert_to_tensor(start_of_sequence_id, dtype)
         end_of_sequence_id = tf.convert_to_tensor(end_of_sequence_id, dtype)
         maximum_length = tf.convert_to_tensor(maximum_length, dtype)
-        num_decoder_symbols = tf.convert_to_tensor(num_decoder_symbols, dtype)
+        cell_size = tf.convert_to_tensor(cell_size, dtype)
         encoder_info = encoder_state[0] if isinstance(encoder_state, tuple) else encoder_state
         batch_size = encoder_info.get_shape()[0].value
         if output_fn is None:
@@ -324,12 +324,12 @@ def simple_decoder_fn_inference(output_fn, encoder_state, embeddings,
                     start_of_sequence_id)
                 done = tf.zeros([batch_size], dtype=tf.bool)
                 cell_state = encoder_state
-                cell_output = tf.zeros([num_decoder_symbols],
+                cell_output = tf.zeros([cell_size],
                                        dtype=tf.float32)
             else:
-                cell_output = output_fn(cell_output)
+                softmax_output = output_fn(cell_output)
                 next_input_id = tf.cast(
-                    tf.argmax(cell_output, 1), dtype=dtype)
+                    tf.argmax(softmax_output, 1), dtype=dtype)
                 done = tf.equal(next_input_id, end_of_sequence_id)
             next_input = tf.gather(embeddings, next_input_id)
             # if time > maxlen, return all true vector
