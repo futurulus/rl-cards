@@ -576,7 +576,7 @@ class LocationSpeaker(ReflexListener):
             utt_embed = tf.nn.embedding_lookup(embeddings, utt_prev)
             outputs, _ = tf.nn.dynamic_rnn(cell, utt_embed, sequence_length=true_utt_len,
                                            initial_state=(loc_embed, loc_embed),
-                                           dtype=tf.float32)
+                                           dtype=tf.float32, scope=varscope)
             next_word_logits = output_fn(outputs)
 
             varscope.reuse_variables()
@@ -587,7 +587,8 @@ class LocationSpeaker(ReflexListener):
                 name='decoder_train'
             )
             predict_outputs, _ = tfutils.dynamic_rnn_decoder(cell, sequence_lengths=true_utt_len,
-                                                             decoder_fn=decoder_predict)
+                                                             decoder_fn=decoder_predict,
+                                                             scope=varscope)
             # predict_logits = output_fn(predict_outputs)
             # predictions = tf.argmax(predict_logits, 2, name='predictions')
             predictions = predict_outputs

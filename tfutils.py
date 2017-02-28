@@ -286,7 +286,7 @@ def dynamic_rnn_decoder(cell, decoder_fn, inputs=None, sequence_lengths=None,
 
         if not time_major:
             # [seq, batch, features] -> [batch, seq, features]
-            outputs = tf.transpose(outputs, perm=[1, 0, 2])
+            outputs = tf.transpose(outputs, perm=[1, 0] + range(2, len(outputs.get_shape())))
         return outputs, state
 
 
@@ -531,7 +531,7 @@ def raw_rnn(cell, loop_fn,
 
         if emit_structure is not None:
             flat_emit_structure = tf.nn.nest.flatten(emit_structure)
-            flat_emit_size = [emit.get_shape() for emit in flat_emit_structure]
+            flat_emit_size = [tf.shape(emit) for emit in flat_emit_structure]
             flat_emit_dtypes = [emit.dtype for emit in flat_emit_structure]
         else:
             emit_structure = cell.output_size
@@ -545,9 +545,7 @@ def raw_rnn(cell, loop_fn,
         emit_ta = tf.nn.nest.pack_sequence_as(structure=emit_structure,
                                               flat_sequence=flat_emit_ta)
         flat_zero_emit = [
-            tf.zeros(
-                tf.nn.rnn_cell._state_size_with_prefix(size_i, prefix=[batch_size]),
-                dtype_i)
+            tf.zeros(size_i, dtype_i)
             for size_i, dtype_i in zip(flat_emit_size, flat_emit_dtypes)]
         zero_emit = tf.nn.nest.pack_sequence_as(structure=emit_structure,
                                                 flat_sequence=flat_zero_emit)
