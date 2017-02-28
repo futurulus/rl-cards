@@ -588,8 +588,9 @@ class LocationSpeaker(ReflexListener):
             )
             predict_outputs, _ = tfutils.dynamic_rnn_decoder(cell, sequence_lengths=true_utt_len,
                                                              decoder_fn=decoder_predict)
-            predict_logits = output_fn(predict_outputs)
-            predictions = tf.argmax(predict_logits, 2, name='predictions')
+            # predict_logits = output_fn(predict_outputs)
+            # predictions = tf.argmax(predict_logits, 2, name='predictions')
+            predictions = predict_outputs
 
         # Scoring
         # http://r2rt.com/recurrent-neural-networks-in-tensorflow-iii-variable-length-sequences.html
