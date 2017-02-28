@@ -6,8 +6,15 @@ import shutil
 from stanza.research import config
 
 
+parser = config.get_options_parser()
+parser.add_argument('--listener', type=config.boolean, default=True,
+                    help='If True, assume data.train.jsons instances are listener data '
+                         '(input: [utt, walls], output: loc). Otherwise, assume speaker data '
+                         '(input: [loc, walls], output: utt).')
+
+
 def output_html_dists():
-    config.options(read=True)
+    options = config.options(read=True)
     with gzip.open(config.get_file_path('dists.b64.gz'), 'r') as infile:
         rows = list(infile)
     with config.open('dists.js', 'w') as outfile:
@@ -16,8 +23,11 @@ def output_html_dists():
 
     with config.open('data.eval.jsons', 'r') as infile:
         insts = list(infile)
+    with config.open('predictions.eval.jsons', 'r') as infile:
+        preds = list(infile)
     with config.open('insts.js', 'w') as outfile:
-        write_json_insts(insts, outfile)
+        write_json_insts(insts, preds, outfile, listener=options.listener)
+
     shutil.copy('dists.html', config.get_file_path('dists.html'))
 
 
@@ -67,11 +77,24 @@ def entropy(card_row):
     return total
 
 
-def write_json_insts(insts, outfile):
+def write_json_insts(insts, preds, outfile, listener=True):
+    outfile.write('function get_utt(inst) {\n')
+    if listener:
+        outfile.write('    return inst["input"]["utt"];\n')
+    else:
+        outfile.write('    return inst["output"];\n')
+    outfile.write('}\n')
+
     outfile.write('INSTS = [\n')
     for row in insts:
         outfile.write(' {},\n'.format(row.strip()))
     outfile.write(']\n')
+
+    if not listener:
+        outfile.write('PREDS = [\n')
+        for row in preds:
+            outfile.write(' {},\n'.format(row.strip()))
+        outfile.write(']\n')
 
 
 def base64_char(n1, n2):

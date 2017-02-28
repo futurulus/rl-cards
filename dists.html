@@ -51,7 +51,10 @@
         function reload_board() {
             $("#row_idx").text(row_idx + 1);
             $("#num_rows").text(ROWS.length);
-            $("#utt").text(INSTS[row_idx]["input"]["utt"].join(" "));
+            $("#utt").text(get_utt(INSTS[row_idx]).join(" "));
+            if (PREDS !== undefined) {
+                $("#pred").text("prediction: " + PREDS[row_idx].join(" "));
+            }
             // $("#board").html("<p>" + ROWS[row_idx].length + "</p>");
             var board_array = generate_array(ROWS[row_idx], rank_idx, suit_idx);
             update_board_table(board_array);
@@ -235,6 +238,9 @@
     </p>
 
     <div id="utt">
+    </div>
+
+    <div id="pred">
     </div>
 
     <div id="cards">

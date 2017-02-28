@@ -642,6 +642,18 @@ class LocationSpeaker(ReflexListener):
 
     def output_to_preds(self, output, batch):
         _, predictions = output
+
+        p2_loc_arrays = -11.0 * (np.array([inst.input['walls'] for inst in batch]) + 2.0)
+        for i, inst in enumerate(batch):
+            p2_loc_arrays[i][inst.input['loc']] = 0.0
+        p2_loc_linear = p2_loc_arrays.reshape([p2_loc_arrays.shape[0], NUM_LOCS])
+        with gzip.open(config.get_file_path('dists.b64.gz'), 'a') as outfile:
+            for row in summarize_output(np.zeros((p2_loc_linear.shape[0],
+                                                  52, NUM_LOCS + 2)),
+                                        p2_loc_linear):
+                outfile.write(row)
+                outfile.write('\n')
+
         return sanitize_preds(self.seq_vec.unvectorize_all(predictions))
 
     def output_to_scores(self, output, labels):
