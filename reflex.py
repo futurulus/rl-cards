@@ -575,8 +575,8 @@ class LocationSpeaker(ReflexListener):
             '''
             utt_embed = tf.nn.embedding_lookup(embeddings, utt_prev)
             outputs, _ = tf.nn.dynamic_rnn(cell, utt_embed, sequence_length=true_utt_len,
+                                           initial_state=(loc_embed, loc_embed),
                                            dtype=tf.float32)
-            print('outputs: {}'.format(outputs))
             next_word_logits = output_fn(outputs)
 
             varscope.reuse_variables()
@@ -588,12 +588,13 @@ class LocationSpeaker(ReflexListener):
             )
             predict_outputs, _ = tfutils.dynamic_rnn_decoder(cell, sequence_lengths=true_utt_len,
                                                              decoder_fn=decoder_predict)
-            predictions = tf.argmax(predict_outputs, 2, name='predictions')
-            print('predictions: {}'.format(predictions))
+            predict_logits = output_fn(predict_outputs)
+            predictions = tf.argmax(predict_logits, 2, name='predictions')
 
         # Scoring
         # http://r2rt.com/recurrent-neural-networks-in-tensorflow-iii-variable-length-sequences.html
-        lower_triangular_ones = tf.constant(np.tril(np.ones([maxlen, maxlen])), dtype=tf.float32)
+        lower_triangular_ones = tf.constant(np.tril(np.ones([maxlen, maxlen]), -1),
+                                            dtype=tf.float32)
         seqlen_mask = tf.slice(tf.gather(lower_triangular_ones, true_utt_len - 1),
                                [0, 0], [-1, tf.shape(utt_next)[1]])
 
