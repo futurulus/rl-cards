@@ -292,7 +292,7 @@ def dynamic_rnn_decoder(cell, decoder_fn, inputs=None, sequence_lengths=None,
 
 def simple_decoder_fn_inference(output_fn, encoder_state, embeddings,
                                 start_of_sequence_id, end_of_sequence_id,
-                                maximum_length, cell_size,
+                                maximum_length, cell_size, sample=False,
                                 dtype=tf.int32, name=None):
     with tf.name_scope(name, "simple_decoder_fn_inference",
                        [output_fn, encoder_state, embeddings,
@@ -328,8 +328,11 @@ def simple_decoder_fn_inference(output_fn, encoder_state, embeddings,
                                        dtype=tf.float32)
             else:
                 softmax_output = output_fn(cell_output)
-                next_input_id = tf.cast(
-                    tf.argmax(softmax_output, 1), dtype=dtype)
+                if sample:
+                    next_input_id = tf.squeeze(tf.multinomial(softmax_output, 1), 1)
+                else:
+                    next_input_id = tf.argmax(softmax_output, 1)
+                next_input_id = tf.cast(next_input_id, dtype=dtype)
                 done = tf.equal(next_input_id, end_of_sequence_id)
             next_input = tf.gather(embeddings, next_input_id)
             # if time > maxlen, return all true vector

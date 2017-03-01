@@ -39,6 +39,12 @@ parser.add_argument('--output_train_data', type=config.boolean, default=False,
 parser.add_argument('--output_test_data', type=config.boolean, default=False,
                     help='If True, write out the evaluation dataset (after cutting down to '
                          '`test_size`) as a JSON-lines file in the output directory.')
+parser.add_argument('--output_train_samples', type=config.boolean, default=False,
+                    help='If True, write out samples from the trained model on the training '
+                         'set after making top-1 predictions.')
+parser.add_argument('--output_test_samples', type=config.boolean, default=False,
+                    help='If True, write out samples from the trained model on the test '
+                         'set after making top-1 predictions.')
 parser.add_argument('--progress_tick', type=int, default=10,
                     help='The number of seconds between logging progress updates.')
 parser.add_argument('--verbosity', type=int, default=4,
@@ -80,9 +86,17 @@ def main():
                                           write_data=options.output_train_data)
         output.output_results(train_results, 'train')
 
+        if options.output_train_samples:
+            samples = learner.predict(train_data, random=True)
+            config.dump(samples, 'samples.train.jsons', lines=True)
+
     test_results = evaluate.evaluate(learner, test_data, metrics=m, split_id='eval',
                                      write_data=options.output_test_data)
     output.output_results(test_results, 'eval')
+
+    if options.output_train_samples:
+        samples = learner.predict(test_data, random=True)
+        config.dump(samples, 'samples.eval.jsons', lines=True)
 
 
 if __name__ == '__main__':

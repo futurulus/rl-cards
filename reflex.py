@@ -221,7 +221,7 @@ class ReflexListener(TensorflowLearner):
             feed_dict = self.vectorize_inputs(batch)
             feed_dict.update(self.vectorize_labels(batch))
             output = self.session.run(self.predict_op, feed_dict)
-            predictions_batch = self.output_to_preds(output, batch)
+            predictions_batch = self.output_to_preds(output, batch, sample=random)
             predictions.extend(predictions_batch)
             labels = self.vectorize_labels(batch)
             scores_batch = self.output_to_scores(output, labels)
@@ -351,7 +351,7 @@ class ReflexListener(TensorflowLearner):
         ])
         return dict(zip(self.label_vars, [true_card_loc, true_p2_loc]))
 
-    def output_to_preds(self, output, batch):
+    def output_to_preds(self, output, batch, sample='ignored'):
         card_names = [rank + suit for rank in cards_env.RANKS for suit in cards_env.SUITS]
         num_cards = len(card_names)
         card_loc_rows, p2_loc = output
@@ -510,7 +510,7 @@ class LocationListener(ReflexListener):
         ])
         return dict(zip(self.label_vars, [true_p2_loc]))
 
-    def output_to_preds(self, output, batch):
+    def output_to_preds(self, output, batch, sample='ignored'):
         assert output.shape[1:] == (NUM_LOCS,), output.shape
 
         with gzip.open(config.get_file_path('dists.b64.gz'), 'a') as outfile:
@@ -580,18 +580,21 @@ class LocationSpeaker(ReflexListener):
             next_word_logits = output_fn(outputs)
 
             varscope.reuse_variables()
-            decoder_predict = tfutils.simple_decoder_fn_inference(
+            decoder_args = [
                 output_fn, (loc_embed, loc_embed), embeddings,
                 self.seq_vec.token_indices['<s>'], self.seq_vec.token_indices['</s>'],
                 self.seq_vec.max_len, self.options.num_rnn_units,
-                name='decoder_train'
-            )
-            predict_outputs, _ = tfutils.dynamic_rnn_decoder(cell, sequence_lengths=true_utt_len,
-                                                             decoder_fn=decoder_predict,
-                                                             scope=varscope)
-            # predict_logits = output_fn(predict_outputs)
-            # predictions = tf.argmax(predict_logits, 2, name='predictions')
-            predictions = predict_outputs
+            ]
+            decoder_predict = tfutils.simple_decoder_fn_inference(*decoder_args,
+                                                                  name='decoder_predict')
+            decoder_sample = tfutils.simple_decoder_fn_inference(*decoder_args, sample=True,
+                                                                 name='decoder_sample')
+            predictions, _ = tfutils.dynamic_rnn_decoder(cell, sequence_lengths=true_utt_len,
+                                                         decoder_fn=decoder_predict,
+                                                         scope=varscope)
+            samples, _ = tfutils.dynamic_rnn_decoder(cell, sequence_lengths=true_utt_len,
+                                                     decoder_fn=decoder_sample,
+                                                     scope=varscope)
 
         # Scoring
         # http://r2rt.com/recurrent-neural-networks-in-tensorflow-iii-variable-length-sequences.html
@@ -603,7 +606,7 @@ class LocationSpeaker(ReflexListener):
         xent = tf.nn.sparse_softmax_cross_entropy_with_logits
         per_token_loss = xent(next_word_logits, utt_next, name='per_token_loss')
         scores = tf.reduce_sum(per_token_loss * seqlen_mask, 1, name='scores')
-        predict_op = (-scores, predictions)
+        predict_op = (-scores, predictions, samples)
 
         # Loss function
         loss = tf.reduce_mean(scores, name='sequence_loss')
@@ -642,8 +645,9 @@ class LocationSpeaker(ReflexListener):
         utt_len = np.array([len(inst.output) for inst in batch])
         return dict(zip(self.label_vars, [utt, utt_len]))
 
-    def output_to_preds(self, output, batch):
-        _, predictions = output
+    def output_to_preds(self, output, batch, sample=False):
+        _, predictions, samples = output
+        indices = samples if sample else predictions
 
         p2_loc_arrays = -11.0 * (np.array([inst.input['walls'] for inst in batch]) + 2.0)
         for i, inst in enumerate(batch):
@@ -656,10 +660,10 @@ class LocationSpeaker(ReflexListener):
                 outfile.write(row)
                 outfile.write('\n')
 
-        return sanitize_preds(self.seq_vec.unvectorize_all(predictions))
+        return sanitize_preds(self.seq_vec.unvectorize_all(indices))
 
     def output_to_scores(self, output, labels):
-        scores, _ = output
+        scores, _, _ = output
         return [float(s) for s in scores]
 
 
