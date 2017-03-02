@@ -94,7 +94,7 @@ def main():
                                      write_data=options.output_test_data)
     output.output_results(test_results, 'eval')
 
-    if options.output_train_samples:
+    if options.output_test_samples:
         samples = learner.predict(test_data, random=True)
         config.dump(samples, 'samples.eval.jsons', lines=True)
 
