@@ -25,8 +25,13 @@ def output_html_dists():
         insts = list(infile)
     with config.open('predictions.eval.jsons', 'r') as infile:
         preds = list(infile)
+    try:
+        with config.open('samples.eval.jsons', 'r') as infile:
+            samples = list(infile)
+    except IOError:
+        samples = None
     with config.open('insts.js', 'w') as outfile:
-        write_json_insts(insts, preds, outfile, listener=options.listener)
+        write_json_insts(insts, preds, samples, outfile, listener=options.listener)
 
     shutil.copy('dists.html', config.get_file_path('dists.html'))
 
@@ -77,7 +82,7 @@ def entropy(card_row):
     return total
 
 
-def write_json_insts(insts, preds, outfile, listener=True):
+def write_json_insts(insts, preds, samples, outfile, listener=True):
     outfile.write('function get_utt(inst) {\n')
     if listener:
         outfile.write('    return inst["input"]["utt"];\n')
@@ -90,11 +95,22 @@ def write_json_insts(insts, preds, outfile, listener=True):
         outfile.write(' {},\n'.format(row.strip()))
     outfile.write(']\n')
 
-    if not listener:
+    if listener:
+        outfile.write('PREDS = undefined;\n')
+        outfile.write('SAMPLES = undefined;\n')
+    else:
         outfile.write('PREDS = [\n')
         for row in preds:
             outfile.write(' {},\n'.format(row.strip()))
         outfile.write(']\n')
+
+        if samples:
+            outfile.write('SAMPLES = [\n')
+            for row in samples:
+                outfile.write(' {},\n'.format(row.strip()))
+            outfile.write(']\n')
+        else:
+            outfile.write('SAMPLES = undefined;\n')
 
 
 def base64_char(n1, n2):

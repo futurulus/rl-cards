@@ -52,8 +52,11 @@
             $("#row_idx").text(row_idx + 1);
             $("#num_rows").text(ROWS.length);
             $("#utt").text(get_utt(INSTS[row_idx]).join(" "));
-            if (PREDS !== undefined) {
+            if (typeof PREDS !== 'undefined') {
                 $("#pred").text("prediction: " + PREDS[row_idx].join(" "));
+            }
+            if (typeof SAMPLES !== 'undefined') {
+                $("#sample").text("sample: " + SAMPLES[row_idx].join(" "));
             }
             // $("#board").html("<p>" + ROWS[row_idx].length + "</p>");
             var board_array = generate_array(ROWS[row_idx], rank_idx, suit_idx);
@@ -241,6 +244,9 @@
     </div>
 
     <div id="pred">
+    </div>
+
+    <div id="sample">
     </div>
 
     <div id="cards">
