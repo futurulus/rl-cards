@@ -451,12 +451,16 @@ class LocationListener(ReflexListener):
                                                     self.options.embedding_size], -1.0, 1.0),
                                  name='embeddings')
 
-        utt_embed = tf.nn.embedding_lookup(embeddings, utt)
-        _, encoder_state_tuple = tf.nn.dynamic_rnn(cell, utt_embed, sequence_length=utt_len,
+        utt_embed = tf.nn.embedding_lookup(embeddings, utt, name='utt_embed')
+        utt_embed_drop = tf.nn.dropout(utt_embed, keep_prob=self.dropout_keep_prob,
+                                       name='utt_embed_drop')
+        _, encoder_state_tuple = tf.nn.dynamic_rnn(cell, utt_embed_drop, sequence_length=utt_len,
                                                    dtype=tf.float32)
-        encoder_state = tf.concat(1, encoder_state_tuple)
+        encoder_state = tf.concat(1, encoder_state_tuple, name='encoder_state')
+        encoder_state_drop = tf.nn.dropout(encoder_state, keep_prob=self.dropout_keep_prob,
+                                           name='encoder_state_drop')
 
-        full_linear = self.state_to_linear_dist(encoder_state)
+        full_linear = self.state_to_linear_dist(encoder_state_drop)
 
         walls_mask = tf.reshape(tf.where(walls <= 0.5,
                                          tf.zeros_like(walls),
@@ -577,7 +581,7 @@ class LocationSpeaker(ReflexListener):
             outputs, _, _ = s2s.dynamic_rnn_decoder(cell, prev_embed, sequence_length=true_utt_len,
                                                     decoder_fn=decoder_train)
             '''
-            utt_embed = tf.nn.embedding_lookup(embeddings, utt_prev)
+            utt_embed = tf.nn.embedding_lookup(embeddings, utt_prev, name='utt_embed')
             utt_embed_drop = tf.nn.dropout(utt_embed, keep_prob=self.dropout_keep_prob,
                                            name='utt_embed_drop')
             outputs, _ = tf.nn.dynamic_rnn(cell, utt_embed_drop, sequence_length=true_utt_len,
