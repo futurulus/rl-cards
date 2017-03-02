@@ -25,6 +25,9 @@ parser.add_argument('--pg_grad_clip', type=float, default=5.0,
                     help='The maximum norm of a tensor gradient in training.')
 parser.add_argument('--pg_train_epochs', type=int, default=1,
                     help='Number of times to pass through the data in training.')
+parser.add_argument('--dropout', type=float, default=0.5,
+                    help='Fraction of dimensions to drop in dropout (1 - keep_prob). '
+                         'Use 0.0 to disable.')
 parser.add_argument('--move_only', type=config.boolean, default=False,
                     help='If True, restrict actions to move actions (left, right, up, down).')
 parser.add_argument('--bias_only', type=config.boolean, default=False,
@@ -56,6 +59,10 @@ class TensorflowLearner(learner.Learner):
                 total += np.prod(var.eval(self.session).shape)
         return total
 
+    @property
+    def use_dropout(self):
+        return True
+
     def init_params(self):
         self.step = 0
         with self.graph.as_default():
@@ -67,6 +74,8 @@ class TensorflowLearner(learner.Learner):
 
         self.graph = tf.Graph()
         with self.graph.as_default():
+            if self.use_dropout:
+                self.dropout_keep_prob = tf.placeholder(tf.float32, name='dropout_keep_prob')
             self.input_vars, self.label_vars, self.train_op, self.predict_op = self.get_layers()
             self.check_op = tfutils.add_check_numerics_ops()
             if self.options.monitor_activations:
@@ -84,9 +93,18 @@ class TensorflowLearner(learner.Learner):
         ops = [self.train_op, self.summary_op]
         if self.options.detect_nans:
             ops.append(self.check_op)
+        if self.use_dropout:
+            feed_dict = dict(feed_dict)
+            feed_dict[self.dropout_keep_prob] = 1.0 - self.options.dropout
         results = self.session.run(ops, feed_dict=feed_dict)
         summary = results[1]
         self.summary_writer.add_summary(summary, self.step)
+
+    def run_predict(self, feed_dict):
+        if self.use_dropout:
+            feed_dict = dict(feed_dict)
+            feed_dict[self.dropout_keep_prob] = 1.0
+        return self.session.run(self.predict_op, feed_dict)
 
     def get_layers(self):
         raise NotImplementedError
@@ -118,7 +136,7 @@ class TensorflowLearner(learner.Learner):
     def __getstate__(self):
         state = dict(super(TensorflowLearner, self).__dict__)
         for k in ['input_vars', 'label_vars', 'train_op', 'predict_op', 'check_op',
-                  'session', 'graph',
+                  'dropout_keep_prob', 'session', 'graph',
                   'saver', 'summary_op', 'run_metadata', 'summary_writer']:
             if k in state:
                 state[k] = Unpicklable(k)

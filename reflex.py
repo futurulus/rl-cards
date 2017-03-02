@@ -220,7 +220,7 @@ class ReflexListener(TensorflowLearner):
 
             feed_dict = self.vectorize_inputs(batch)
             feed_dict.update(self.vectorize_labels(batch))
-            output = self.session.run(self.predict_op, feed_dict)
+            output = self.run_predict(feed_dict)
             predictions_batch = self.output_to_preds(output, batch, sample=random)
             predictions.extend(predictions_batch)
             labels = self.vectorize_labels(batch)
@@ -541,7 +541,9 @@ class LocationSpeaker(ReflexListener):
         loc_embeddings = tf.Variable(tf.random_uniform([NUM_LOCS, self.options.num_rnn_units],
                                                        -1.0, 1.0),
                                      name='loc_embeddings')
-        loc_embed = tf.nn.embedding_lookup(loc_embeddings, p2_loc)
+        loc_embed = tf.nn.embedding_lookup(loc_embeddings, p2_loc, name='loc_embed')
+        loc_embed_drop = tf.nn.dropout(loc_embed, keep_prob=self.dropout_keep_prob,
+                                       name='loc_embed_drop')
 
         cell = tf.contrib.rnn.LSTMBlockCell(num_units=self.options.num_rnn_units,
                                             use_peephole=False)
@@ -564,24 +566,28 @@ class LocationSpeaker(ReflexListener):
                                                         self.options.embedding_size], -1.0, 1.0),
                                      name='embedding')
 
-            output_fn = lambda x: fc(x, trainable=True, activation_fn=tf.identity,
-                                     num_outputs=self.seq_vec.num_types,
-                                     scope=varscope)
+            def output_fn(rep):
+                rep_drop = tf.nn.dropout(rep, keep_prob=self.dropout_keep_prob, name='rep_drop')
+                return fc(rep_drop, trainable=True, activation_fn=tf.identity,
+                          num_outputs=self.seq_vec.num_types,
+                          scope=varscope)
 
             '''
-            decoder_train = s2s.simple_decoder_fn_train(loc_embed, name='decoder_train')
+            decoder_train = s2s.simple_decoder_fn_train(loc_embed_drop, name='decoder_train')
             outputs, _, _ = s2s.dynamic_rnn_decoder(cell, prev_embed, sequence_length=true_utt_len,
                                                     decoder_fn=decoder_train)
             '''
             utt_embed = tf.nn.embedding_lookup(embeddings, utt_prev)
-            outputs, _ = tf.nn.dynamic_rnn(cell, utt_embed, sequence_length=true_utt_len,
-                                           initial_state=(loc_embed, loc_embed),
+            utt_embed_drop = tf.nn.dropout(utt_embed, keep_prob=self.dropout_keep_prob,
+                                           name='utt_embed_drop')
+            outputs, _ = tf.nn.dynamic_rnn(cell, utt_embed_drop, sequence_length=true_utt_len,
+                                           initial_state=(loc_embed_drop, loc_embed_drop),
                                            dtype=tf.float32, scope=varscope)
             next_word_logits = output_fn(outputs)
 
             varscope.reuse_variables()
             decoder_args = [
-                output_fn, (loc_embed, loc_embed), embeddings,
+                output_fn, (loc_embed_drop, loc_embed_drop), embeddings,
                 self.seq_vec.token_indices['<s>'], self.seq_vec.token_indices['</s>'],
                 self.seq_vec.max_len, self.options.num_rnn_units,
             ]
