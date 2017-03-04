@@ -32,6 +32,15 @@ parser.add_argument('--dist_offset_col', type=int, default=0,
                     help='Which column to place the ace of spades in '
                          '(relative to player position). '
                          'Used only in "dist" data_source.')
+parser.add_argument('--sampler_model_learner', default=None,
+                    help='The class of the model to draw samples from in co-training. Used '
+                         'only in "samples_ls_to_ll" data_source.')
+parser.add_argument('--sampler_model_load', default=None,
+                    help='The prefix of the model to draw samples from in co-training. Used '
+                         'only in "samples_ls_to_ll" data_source.')
+parser.add_argument('--num_samples', type=int, default=10000,
+                    help='Number of samples to draw in co-training. Used '
+                         'only in "samples_ls_to_ll" data_source.')
 
 
 def train_transcripts():
@@ -201,6 +210,39 @@ def location_s_test():
     return location_insts(start=500, listener=False)
 
 
+def location_speaker_prior(num_samples):
+    '''
+    Sample `num_samples` random worlds to feed to a location speaker.
+    '''
+    template = location_insts(end=1, listener=False)[0]
+    insts = []
+    walls = template.input['walls']
+    locs = sample_valid_locs(walls, num_samples)
+    for loc in locs:
+        insts.append(Instance(input={'loc': loc, 'walls': walls}, output=['<s>', '</s>']))
+    return insts
+
+
+def sample_valid_locs(walls, num_samples):
+    walls = np.array(walls)
+    valid_locs = np.where(walls == 0)
+    index_range = np.arange(valid_locs[0].shape[0])
+    indices = np.random.choice(index_range, num_samples)
+    return [(valid_locs[0][i], valid_locs[1][i]) for i in indices]
+
+
+def samples_ls_to_ll():
+    import learners
+    options = config.options()
+    learner = learners.new(options.sampler_model_learner)
+    learner.load(options.sampler_model_load)
+    inputs = location_speaker_prior(options.num_samples)
+    samples = learner.predict(inputs, random=True)
+    return [Instance(input={'utt': samp, 'walls': inp.input['walls']},
+                     output=inp.input['loc'])
+            for inp, samp in zip(inputs, samples)]
+
+
 DataSource = namedtuple('DataSource', ['train_data', 'test_data'])
 
 SOURCES = {
@@ -217,4 +259,5 @@ SOURCES = {
     'location_l_test': DataSource(location_l_train, location_l_test),
     'location_s_dev': DataSource(location_s_train, location_s_dev),
     'location_s_test': DataSource(location_s_train, location_s_test),
+    'samples_ls_to_ll': DataSource(samples_ls_to_ll, location_l_dev),
 }
