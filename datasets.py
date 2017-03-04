@@ -34,13 +34,13 @@ parser.add_argument('--dist_offset_col', type=int, default=0,
                          'Used only in "dist" data_source.')
 parser.add_argument('--sampler_model_learner', default=None,
                     help='The class of the model to draw samples from in co-training. Used '
-                         'only in "samples_ls_to_ll" data_source.')
+                         'only in "samples_*_to_*" data_sources.')
 parser.add_argument('--sampler_model_load', default=None,
                     help='The prefix of the model to draw samples from in co-training. Used '
-                         'only in "samples_ls_to_ll" data_source.')
+                         'only in "samples_*_to_*" data_sources.')
 parser.add_argument('--num_samples', type=int, default=10000,
                     help='Number of samples to draw in co-training. Used '
-                         'only in "samples_ls_to_ll" data_source.')
+                         'only in "samples_*_to_*" data_sources.')
 
 
 def train_transcripts():
@@ -223,6 +223,19 @@ def location_speaker_prior(num_samples):
     return insts
 
 
+def location_listener_prior(num_samples):
+    '''
+    Sample `num_samples` random utterances to feed to a location listener.
+    '''
+    template = location_insts(end=1, listener=False)[0]
+    insts = []
+    walls = template.input['walls']
+    utts = [inst.input['utt'] for inst in interpret_train()][:num_samples]
+    for utt in utts:
+        insts.append(Instance(input={'utt': utt, 'walls': walls}, output=(0, 0)))
+    return insts
+
+
 def sample_valid_locs(walls, num_samples):
     walls = np.array(walls)
     valid_locs = np.where(walls == 0)
@@ -243,6 +256,18 @@ def samples_ls_to_ll():
             for inp, samp in zip(inputs, samples)]
 
 
+def samples_ll_to_ls():
+    import learners
+    options = config.options()
+    learner = learners.new(options.sampler_model_learner)
+    learner.load(options.sampler_model_load)
+    inputs = location_listener_prior(options.num_samples)
+    samples = learner.predict(inputs, random=True)
+    return [Instance(input={'loc': samp, 'walls': inp.input['walls']},
+                     output=inp.input['utt'])
+            for inp, samp in zip(inputs, samples)]
+
+
 DataSource = namedtuple('DataSource', ['train_data', 'test_data'])
 
 SOURCES = {
@@ -260,4 +285,5 @@ SOURCES = {
     'location_s_dev': DataSource(location_s_train, location_s_dev),
     'location_s_test': DataSource(location_s_train, location_s_test),
     'samples_ls_to_ll': DataSource(samples_ls_to_ll, location_l_dev),
+    'samples_ll_to_ls': DataSource(samples_ll_to_ls, location_s_dev),
 }
