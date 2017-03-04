@@ -576,11 +576,6 @@ class LocationSpeaker(ReflexListener):
                           num_outputs=self.seq_vec.num_types,
                           scope=varscope)
 
-            '''
-            decoder_train = s2s.simple_decoder_fn_train(loc_embed_drop, name='decoder_train')
-            outputs, _, _ = s2s.dynamic_rnn_decoder(cell, prev_embed, sequence_length=true_utt_len,
-                                                    decoder_fn=decoder_train)
-            '''
             utt_embed = tf.nn.embedding_lookup(embeddings, utt_prev, name='utt_embed')
             utt_embed_drop = tf.nn.dropout(utt_embed, keep_prob=self.dropout_keep_prob,
                                            name='utt_embed_drop')
@@ -630,8 +625,6 @@ class LocationSpeaker(ReflexListener):
                 print(var.name)
         train_op = tfutils.minimize_with_grad_clip(opt, self.options.pg_grad_clip,
                                                    loss, var_list=var_list)
-
-        # Test-time prediction
 
         return input_vars, label_vars, train_op, predict_op
 
