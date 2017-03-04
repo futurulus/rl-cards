@@ -556,7 +556,10 @@ class LocationSpeaker(ReflexListener):
         true_utt = tf.placeholder(tf.int32, shape=(None, maxlen),
                                   name='true_utt')
         true_utt_len = tf.placeholder(tf.int32, shape=(None,), name='true_utt_len')
-        true_utt_reduced = tf.slice(true_utt, [0, 0], [-1, tf.reduce_max(true_utt_len)])
+        reduced_size = tf.minimum(tf.shape(true_utt)[1], tf.reduce_max(true_utt_len),
+                                  name='reduced_size')
+        true_utt_reduced = tf.slice(true_utt, [0, 0], [-1, reduced_size])
+        true_utt_len_clipped = tf.minimum(reduced_size, true_utt_len, name='true_utt_len_clipped')
 
         utt_prev = tf.slice(true_utt_reduced, [0, 0], [-1, tf.shape(true_utt_reduced)[1] - 1])
         utt_next = tf.slice(true_utt_reduced, [0, 1], [-1, -1])
@@ -579,7 +582,8 @@ class LocationSpeaker(ReflexListener):
             utt_embed = tf.nn.embedding_lookup(embeddings, utt_prev, name='utt_embed')
             utt_embed_drop = tf.nn.dropout(utt_embed, keep_prob=self.dropout_keep_prob,
                                            name='utt_embed_drop')
-            outputs, _ = tf.nn.dynamic_rnn(cell, utt_embed_drop, sequence_length=true_utt_len,
+            outputs, _ = tf.nn.dynamic_rnn(cell, utt_embed_drop,
+                                           sequence_length=true_utt_len_clipped,
                                            initial_state=(loc_embed_drop, loc_embed_drop),
                                            dtype=tf.float32, scope=varscope)
             next_word_logits = output_fn(outputs)
@@ -594,10 +598,12 @@ class LocationSpeaker(ReflexListener):
                                                                   name='decoder_predict')
             decoder_sample = tfutils.simple_decoder_fn_inference(*decoder_args, sample=True,
                                                                  name='decoder_sample')
-            predictions, _ = tfutils.dynamic_rnn_decoder(cell, sequence_lengths=true_utt_len,
+            predictions, _ = tfutils.dynamic_rnn_decoder(cell,
+                                                         sequence_lengths=true_utt_len_clipped,
                                                          decoder_fn=decoder_predict,
                                                          scope=varscope)
-            samples, _ = tfutils.dynamic_rnn_decoder(cell, sequence_lengths=true_utt_len,
+            samples, _ = tfutils.dynamic_rnn_decoder(cell,
+                                                     sequence_lengths=true_utt_len_clipped,
                                                      decoder_fn=decoder_sample,
                                                      scope=varscope)
 
@@ -605,7 +611,7 @@ class LocationSpeaker(ReflexListener):
         # http://r2rt.com/recurrent-neural-networks-in-tensorflow-iii-variable-length-sequences.html
         lower_triangular_ones = tf.constant(np.tril(np.ones([maxlen, maxlen]), -1),
                                             dtype=tf.float32)
-        seqlen_mask = tf.slice(tf.gather(lower_triangular_ones, true_utt_len - 1),
+        seqlen_mask = tf.slice(tf.gather(lower_triangular_ones, true_utt_len_clipped - 1),
                                [0, 0], [-1, tf.shape(utt_next)[1]])
 
         xent = tf.nn.sparse_softmax_cross_entropy_with_logits
