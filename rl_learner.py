@@ -6,11 +6,14 @@ from stanza.monitoring import progress
 from stanza.research import config, iterators, learner
 from stanza.research.rng import get_rng
 
+from world import cards
 import cards_env
 from baseline import CardsLearner
+import datasets
 import tfutils
 from tfutils import minimize_with_grad_clip
 from helpers import profile
+import vectorizers
 
 rng = get_rng()
 
@@ -118,7 +121,7 @@ class TensorflowLearner(learner.Learner):
         self.build_graph()
         self.saver.save(self.session, prefix, global_step=0)
         with open(prefix + '.pkl', 'wb') as outfile:
-            super(TensorflowLearner, self).dump(outfile)
+            learner.Learner.dump(self, outfile)
 
     def load(self, filename):
         '''
@@ -134,7 +137,7 @@ class TensorflowLearner(learner.Learner):
         self.saver.restore(self.session, filename + '-0')
 
     def __getstate__(self):
-        state = dict(super(TensorflowLearner, self).__dict__)
+        state = dict(self.__dict__)
         for k in ['input_vars', 'label_vars', 'train_op', 'predict_op', 'check_op',
                   'dropout_keep_prob', 'session', 'graph',
                   'saver', 'summary_op', 'run_metadata', 'summary_writer']:
@@ -185,6 +188,38 @@ class KarpathyPGLearner(TensorflowLearner, CardsLearner):
             progress.end_task()
 
     def get_layers(self):
+        input_vars, predict_op = self.get_predict_op()
+
+        action = tf.placeholder(tf.int32, shape=(None,), name='action')
+        reward = tf.placeholder(tf.float32, shape=(None,), name='reward')
+        credit = tf.placeholder(tf.float32, shape=(None,), name='credit')
+        label_vars = [action, reward, credit]
+
+        reward_mean, reward_variance = tfutils.moments(reward)
+        normalized = tf.nn.batch_normalization(reward, reward_mean, reward_variance,
+                                               scale=1.0, offset=0.0, variance_epsilon=1e-4)
+        opt = tf.train.RMSPropOptimizer(learning_rate=0.1)
+        logp = tf.neg(tf.nn.sparse_softmax_cross_entropy_with_logits(predict_op, action),
+                      name='action_log_prob')
+        dlogp = tf.sub(1.0, tf.exp(logp), name='dlogp')
+        signal = tf.mul(dlogp, normalized * credit, name='signal')
+        signal_down = tf.reduce_sum(tf.slice(tf.reshape(signal, [-1, 10]),
+                                             [0, 1], [-1, 1]),
+                                    [0], name='signal_down')
+        print_node = tf.Print(signal, [signal_down], message='signal_down: ', summarize=10)
+        with tf.control_dependencies([print_node]):
+            signal = tf.identity(signal)
+        loss = tf.reduce_mean(-signal, name='loss')
+        var_list = tf.trainable_variables()
+        print('Trainable variables:')
+        for var in var_list:
+            print(var.name)
+        train_op = minimize_with_grad_clip(opt, self.options.pg_grad_clip,
+                                           loss, var_list=var_list)
+
+        return input_vars, label_vars, train_op, predict_op
+
+    def get_predict_op(self):
         walls = tf.placeholder(tf.float32, shape=(None,) + cards_env.MAX_BOARD_SIZE,
                                name='walls')
         cards = tf.placeholder(tf.float32, shape=(None,) + cards_env.MAX_BOARD_SIZE,
@@ -210,38 +245,11 @@ class KarpathyPGLearner(TensorflowLearner, CardsLearner):
                             num_outputs=len(cards_env.ACTIONS))
             with tf.variable_scope('fully_connected_1', reuse=True):
                 biases = tf.get_variable('biases')
+            print_node = tf.Print(predict_op, [biases], message='biases: ', summarize=10)
+            with tf.control_dependencies([print_node]):
+                predict_op = tf.identity(predict_op)
 
-        action = tf.placeholder(tf.int32, shape=(None,), name='action')
-        reward = tf.placeholder(tf.float32, shape=(None,), name='reward')
-        credit = tf.placeholder(tf.float32, shape=(None,), name='credit')
-        label_vars = [action, reward, credit]
-
-        reward_mean, reward_variance = tfutils.moments(reward)
-        normalized = tf.nn.batch_normalization(reward, reward_mean, reward_variance,
-                                               scale=1.0, offset=0.0, variance_epsilon=1e-4)
-        opt = tf.train.RMSPropOptimizer(learning_rate=0.1)
-        logp = tf.neg(tf.nn.sparse_softmax_cross_entropy_with_logits(predict_op, action),
-                      name='action_log_prob')
-        dlogp = tf.sub(1.0, tf.exp(logp), name='dlogp')
-        signal = tf.mul(dlogp, normalized * credit, name='signal')
-        signal_down = tf.reduce_sum(tf.slice(tf.reshape(signal, [-1, 10]),
-                                             [0, 1], [-1, 1]),
-                                    [0], name='signal_down')
-        print_node = tf.Print(signal, [signal_down], message='signal_down: ', summarize=10)
-        with tf.control_dependencies([print_node]):
-            signal = tf.identity(signal)
-        loss = tf.reduce_mean(-signal, name='loss')
-        print_node = tf.Print(loss, [biases], message='biases: ', summarize=10)
-        with tf.control_dependencies([print_node]):
-            loss = tf.identity(loss)
-        var_list = tf.trainable_variables()
-        print('Trainable variables:')
-        for var in var_list:
-            print(var.name)
-        train_op = minimize_with_grad_clip(opt, self.options.pg_grad_clip,
-                                           loss, var_list=var_list)
-
-        return input_vars, label_vars, train_op, predict_op
+        return input_vars, predict_op
 
     @profile
     def train_one_batch(self, insts, env, t):
@@ -300,18 +308,12 @@ class KarpathyPGLearner(TensorflowLearner, CardsLearner):
                                                   total_rewards,
                                                   credit]):
             feed_dict[label] = value
-        ops = [self.train_op, self.summary_op]
-        if self.options.detect_nans:
-            ops.append(self.check_op)
-        results = self.session.run(ops, feed_dict=feed_dict)
-        summary = results[1]
-        self.summary_writer.add_summary(summary, t)
-        # print('Adding summary: {}'.format(t))
+        self.run_train(feed_dict)
 
     def action(self, env, observations, info, testing=True):
-        inputs = self.preprocess(observations)
+        inputs = self.preprocess(observations, env)
         feed_dict = self.batch_inputs(inputs)
-        dist = self.session.run(self.predict_op, feed_dict=feed_dict)
+        dist = self.run_predict(feed_dict=feed_dict)
         #                       options=tf.RunOptions(trace_level=tf.RunOptions.FULL_TRACE),
         #                       run_metadata=self.run_metadata)
         random_epsilon = 0.0 if testing else self.options.pg_random_epsilon
@@ -322,7 +324,7 @@ class KarpathyPGLearner(TensorflowLearner, CardsLearner):
         self.actions.extend(actions)
         return actions
 
-    def preprocess(self, observations):
+    def preprocess(self, observations, env):
         processed = []
         for start in range(0, len(observations), 6):
             walls, cards, player, hand, floor, language = observations[start:start + 6]
@@ -339,12 +341,95 @@ class KarpathyPGLearner(TensorflowLearner, CardsLearner):
         self.actions = []
         self.rewards = []
         self.done = []
-        self.inputs = self.preprocess(observations)
+        self.inputs = self.preprocess(observations, env)
 
     def update_belief(self, env, prev_obs, actions, observations, rewards, done, info):
         self.rewards.append(rewards)
         self.done.append(done)
-        self.inputs.extend(self.preprocess(observations))
+        self.inputs.extend(self.preprocess(observations, env))
+
+
+class RLListenerLearner(KarpathyPGLearner):
+    def train(self, training_instances, validation_instances='ignored', metrics='ignored'):
+        self.init_vectorizers()
+        super(RLListenerLearner, self).train(training_instances, validation_instances, metrics)
+
+    def init_vectorizers(self):
+        if self.options.verbosity >= 4:
+            print('Initializing vectorizer')
+        unk_threshold = self.options.unk_threshold
+        self.seq_vec = vectorizers.SequenceVectorizer(unk_threshold=unk_threshold)
+        for trans in datasets.train_transcripts():
+            for event in trans.events:
+                if event.action == cards.UTTERANCE:
+                    utt = ['<s>'] + event.parse_contents() + ['</s>']
+                    self.seq_vec.add(utt)
+
+    def get_predict_op(self):
+        # Inputs
+        walls = tf.placeholder(tf.float32, shape=(None,) + cards_env.MAX_BOARD_SIZE,
+                               name='walls')
+        cards = tf.placeholder(tf.float32, shape=(None,) + cards_env.MAX_BOARD_SIZE,
+                               name='cards')
+        player = tf.placeholder(tf.float32, shape=(None,) + cards_env.MAX_BOARD_SIZE,
+                                name='player')
+        utt = tf.placeholder(tf.int32, shape=(None, self.seq_vec.max_len),
+                             name='utt')
+        utt_len = tf.placeholder(tf.int32, shape=(None,), name='utt_len')
+        input_vars = [walls, cards, player, utt, utt_len]
+
+        # Hidden layers
+        cell = tf.contrib.rnn.LSTMBlockCell(num_units=self.options.num_rnn_units,
+                                            use_peephole=False)
+
+        embeddings = tf.Variable(tf.random_uniform([self.seq_vec.num_types,
+                                                    self.options.embedding_size], -1.0, 1.0),
+                                 name='embeddings')
+
+        utt_embed = tf.nn.embedding_lookup(embeddings, utt, name='utt_embed')
+        utt_embed_drop = tf.nn.dropout(utt_embed, keep_prob=self.dropout_keep_prob,
+                                       name='utt_embed_drop')
+        _, encoder_state_tuple = tf.nn.dynamic_rnn(cell, utt_embed_drop, sequence_length=utt_len,
+                                                   dtype=tf.float32)
+        encoder_state = tf.concat(1, encoder_state_tuple, name='encoder_state')
+        encoder_state_drop = tf.nn.dropout(encoder_state, keep_prob=self.dropout_keep_prob,
+                                           name='encoder_state_drop')
+
+        flattened = [tf.contrib.layers.flatten(t)
+                     for t in (walls, cards, player, encoder_state_drop)]
+        combined_input = tf.concat(1, flattened, name='combined_input')
+
+        fc = tf.contrib.layers.fully_connected
+        if self.options.bias_only:
+            predict_op = fc(0.0 * combined_input, trainable=True,
+                            activation_fn=tf.identity, num_outputs=len(cards_env.ACTIONS))
+            with tf.variable_scope('fully_connected', reuse=True):
+                biases = tf.get_variable('biases')
+        else:
+            hidden1 = fc(combined_input, trainable=True,
+                         num_outputs=self.options.pg_hidden_size)
+            predict_op = fc(hidden1, trainable=True, activation_fn=tf.identity,
+                            num_outputs=len(cards_env.ACTIONS))
+            with tf.variable_scope('fully_connected_1', reuse=True):
+                biases = tf.get_variable('biases')
+            print_node = tf.Print(predict_op, [biases], message='biases: ', summarize=10)
+            with tf.control_dependencies([print_node]):
+                predict_op = tf.identity(predict_op)
+
+        return input_vars, predict_op
+
+    def preprocess(self, observations, env):
+        processed = []
+        for w in range(0, len(observations) / 6):
+            walls, cards, player, hand, floor, language = observations[w * 6:(w + 1) * 6]
+            if language[0]:
+                utt_tokens = env.get_language_obs(w, 0)[0]
+            else:
+                utt_tokens = ['<s>', '</s>']
+            utt = self.seq_vec.vectorize(utt_tokens)
+            utt_len = len(utt_tokens)
+            processed.append([walls, cards, player, utt, utt_len])
+        return processed
 
 
 def sample(a, temperature=1.0, random_epsilon=0.0, verbose=False):

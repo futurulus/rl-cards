@@ -1,5 +1,5 @@
 from baseline import RandomLearner, SearcherLearner, OracleLearner
-from rl_learner import KarpathyPGLearner
+from rl_learner import KarpathyPGLearner, RLListenerLearner
 from reflex import UniformListener, ReflexListener, FactoredReflexListener
 from reflex import LocationListener, LocationSpeaker
 
@@ -17,6 +17,7 @@ LEARNERS = {
     'Searcher': SearcherLearner,
     'Oracle': OracleLearner,
     'KarpathyPG': KarpathyPGLearner,
+    'RLL': RLListenerLearner,
     'UniformL': UniformListener,
     'ReflexL': ReflexListener,
     'FactoredReflexL': FactoredReflexListener,

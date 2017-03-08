@@ -11,8 +11,10 @@ try:
 except pyglet.canvas.xlib.NoSuchDisplayException:
     Geom = object
 
+from stanza.research import config
 
 from cards_cache import all_transcripts
+import cards_config
 from helpers import profile
 
 
@@ -34,6 +36,9 @@ class CardsEnv(gym.Env):
     }
 
     def __init__(self):
+        options = config.options()
+        self.game_config = cards_config.new(options.game_config)
+
         self.viewer = None
 
         self.verbosity = 4
@@ -44,8 +49,8 @@ class CardsEnv(gym.Env):
         self.action_space = spaces.Tuple([player for _ in range(MAX_BATCH_SIZE)])
         # One board for walls, one for card observations, one for player location
         board = spaces.Box(np.zeros(MAX_BOARD_SIZE), np.ones(MAX_BOARD_SIZE))
-        # TODO: represent language in observations
-        language = spaces.Box(np.array(0.), np.array(1.))
+        language_player = spaces.Box(np.array(0.), np.array(1.))
+        language = spaces.Tuple([language_player for _ in range(self.game_config.num_players - 1)])
         hand = spaces.Box(np.zeros((3, len(RANKS), len(SUITS))),
                           np.ones((3, len(RANKS), len(SUITS))))
         floor = spaces.Box(np.zeros((len(RANKS), len(SUITS))),
@@ -182,15 +187,28 @@ class CardsEnv(gym.Env):
     @profile
     def _get_obs(self):
         all_obs = []
+        self.game_config.update_language_obs(self)
         for w in range(MAX_BATCH_SIZE):
             # Invisible walls (walls = -1.0) are not observed (but still prevent movement)
             wall_obs = np.maximum(self.walls[w], 0.0)
             player_obs = np.zeros(self.walls.shape[1:])
             player_obs[self.p1_loc[w]] = 1.0
-            language = np.array(0.)  # TODO
+            language_producers = np.array([(u is not None)
+                                           for u in self.game_config.get_language_obs(self, w)],
+                                          dtype=np.int)
+            if language_producers.sum() >= 2.0:
+                language_observers = np.ones(language_producers.shape, dtype=np.float32)
+            elif language_producers.any():
+                language_observers = 1.0 - language_producers.astype(np.float32)
+            else:
+                language_observers = np.zeros(language_producers.shape, dtype=np.float32)
             all_obs.extend([wall_obs, self._card_obs(w), player_obs,
-                            self._hand_obs(w), self._floor_obs(w), language])
+                            self._hand_obs(w), self._floor_obs(w), language_observers])
         return all_obs
+
+    def get_language_obs(self, w, requesting_player):
+        return [u for i, u in enumerate(self.game_config.get_language_obs(self, w))
+                if i != requesting_player]
 
     @profile
     def _card_obs(self, w):
