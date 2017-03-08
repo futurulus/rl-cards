@@ -240,7 +240,7 @@ class CardsEnv(gym.Env):
         RENDER_WORLD = 0
 
         if close:
-            if self.viewer is not None:
+            if hasattr(self, 'viewer') and self.viewer is not None:
                 self.viewer.close()
                 self.viewer = None
             return

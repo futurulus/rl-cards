@@ -63,9 +63,10 @@ class AceModelS(Config):
                 insts.append(self.build_inst(env, w))
                 update_ws.append(w)
                 self.ace_locs[w] = ace_loc
-        new_utts = self.speaker.predict(insts, random=True)
-        for w, utt in zip(update_ws, new_utts):
-            self.utterances[w] = utt
+        if insts:
+            new_utts = self.speaker.predict(insts, random=True)
+            for w, utt in zip(update_ws, new_utts):
+                self.utterances[w] = utt
 
     def get_language_obs(self, env, w):
         return [None, self.utterances[w]]
