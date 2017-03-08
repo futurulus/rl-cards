@@ -29,6 +29,12 @@ class Config(object):
     def get_all_language_obs(self, env, w):
         return [None for _ in range(len(self.num_players))]
 
+    def value(self, env, w):
+        return 0.0
+
+    def action_reward(self, env, w, action):
+        return -1.0
+
 
 class Ace1P(Config):
     @property
@@ -68,6 +74,15 @@ class AceModelS(Config):
         return instance.Instance(input={'loc': env.cards_to_loc[w][(0, 0)],
                                         'walls': env.walls[w]},
                                  output=['<s>', '</s>'])
+
+    def value(self, env, w):
+        px, py = env.p1_loc[w]
+        cx, cy = env.cards_to_loc[w][(0, 0)]
+        # Manhattan distance
+        return abs(px - cx) + abs(py - cy)
+
+    def action_reward(self, env, w, action):
+        return 0.0
 
 
 CONFIGS = {

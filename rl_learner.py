@@ -28,6 +28,8 @@ parser.add_argument('--pg_grad_clip', type=float, default=5.0,
                     help='The maximum norm of a tensor gradient in training.')
 parser.add_argument('--pg_train_epochs', type=int, default=1,
                     help='Number of times to pass through the data in training.')
+parser.add_argument('--pg_normalize', type=config.boolean, default=True,
+                    help='If True, apply batch normalization to total rewards to reduce gradients.')
 parser.add_argument('--dropout', type=float, default=0.5,
                     help='Fraction of dimensions to drop in dropout (1 - keep_prob). '
                          'Use 0.0 to disable.')
@@ -195,9 +197,12 @@ class KarpathyPGLearner(TensorflowLearner, CardsLearner):
         credit = tf.placeholder(tf.float32, shape=(None,), name='credit')
         label_vars = [action, reward, credit]
 
-        reward_mean, reward_variance = tfutils.moments(reward)
-        normalized = tf.nn.batch_normalization(reward, reward_mean, reward_variance,
-                                               scale=1.0, offset=0.0, variance_epsilon=1e-4)
+        if self.options.pg_normalize:
+            reward_mean, reward_variance = tfutils.moments(reward)
+            normalized = tf.nn.batch_normalization(reward, reward_mean, reward_variance,
+                                                   scale=1.0, offset=0.0, variance_epsilon=1e-4)
+        else:
+            normalized = reward
         opt = tf.train.RMSPropOptimizer(learning_rate=0.1)
         logp = tf.neg(tf.nn.sparse_softmax_cross_entropy_with_logits(predict_op, action),
                       name='action_log_prob')
@@ -296,7 +301,7 @@ class KarpathyPGLearner(TensorflowLearner, CardsLearner):
         assert total_rewards.shape == (rewards.shape[0] * rewards.shape[1],), \
             (total_rewards.shape, rewards.shape)
         credit = np.ones(done.shape)
-        credit[1:, :] = 1.0 - done[:-1, :]
+        credit[1:, :] *= 1.0 - done[:-1, :]
         credit = credit.ravel()  # (credit / credit.sum(axis=0)).ravel()
         assert credit.shape == total_rewards.shape, (credit.shape, total_rewards.shape)
 

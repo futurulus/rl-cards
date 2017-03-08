@@ -75,33 +75,40 @@ class CardsEnv(gym.Env):
         actions = [ACTIONS[a] for a in u]
         rewards = []
         done = []
-        for i, action in enumerate(actions):
+        for w, action in enumerate(actions):
+            old_value = self.game_config.value(self, w)
+
             if action == 'nop':
                 pass
             elif action == 'right':
-                self._move(i, 0, 1)
+                self._move(w, 0, 1)
             elif action == 'up':
-                self._move(i, -1, 0)
+                self._move(w, -1, 0)
             elif action == 'left':
-                self._move(i, 0, -1)
+                self._move(w, 0, -1)
             elif action == 'down':
-                self._move(i, 1, 0)
+                self._move(w, 1, 0)
             elif action == 'pick':
-                self._pick(i)
+                self._pick(w)
             elif action == 'drop0':
-                self._drop(i, 0)
+                self._drop(w, 0)
             elif action == 'drop1':
-                self._drop(i, 1)
+                self._drop(w, 1)
             elif action == 'drop2':
-                self._drop(i, 2)
+                self._drop(w, 2)
             elif action == 'speak':
-                self._speak(i)
+                self._speak(w)
             else:
                 raise RuntimeError('invalid action name: %s' % (action,))
 
-            done_i = self._is_done(i)
-            done.append(done_i)
-            rewards.append(0.0 if done_i else -1.0)
+            done_w = self._is_done(w)
+            done.append(done_w)
+            if done_w:
+                rewards.append(0.0)
+            else:
+                new_value = self.game_config.value(self, w)
+                action_reward = self.game_config.action_reward(self, w, action)
+                rewards.append(new_value - old_value + action_reward)
         #      obs, reward, done, info
         return self._get_obs(), rewards, done, {}
 
