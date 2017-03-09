@@ -164,7 +164,15 @@ def interpret_test():
     return interpret(test_transcripts())
 
 
-def location_insts(start=None, end=None, listener=True):
+def get_location_utt(example, tokenizer):
+    return tokenizer.tokenize(example['Text'])
+
+
+def get_annotation_utt(example, tokenizer):
+    return [example['Domain']] + example['Semantics'].split(';')
+
+
+def location_insts(start=None, end=None, listener=True, get_utt=get_location_utt):
     insts = []
     tokenizer = cards.Tokenizer()
     with open('potts-wccfl30-supp/wccfl30-location-phrases.csv', 'r') as infile:
@@ -172,7 +180,7 @@ def location_insts(start=None, end=None, listener=True):
         examples = list(reader)[start:end]
     for example in examples:
         walls = world.walls_from_str(example['Map'])
-        utt = ['<s>'] + tokenizer.tokenize(example['Text']) + ['</s>']
+        utt = ['<s>'] + get_utt(example, tokenizer) + ['</s>']
         loc = (int(example['X']), int(example['Y']))
         if listener:
             inst = Instance(input={'utt': utt, 'walls': walls}, output=loc)
@@ -208,6 +216,18 @@ def location_s_dev():
 
 def location_s_test():
     return location_insts(start=500, listener=False)
+
+
+def annotations_s_train():
+    return location_insts(end=400, listener=False, get_utt=get_annotation_utt)
+
+
+def annotations_s_dev():
+    return location_insts(400, 500, listener=False, get_utt=get_annotation_utt)
+
+
+def annotations_s_test():
+    return location_insts(start=500, listener=False, get_utt=get_annotation_utt)
 
 
 def location_speaker_prior(num_samples):
@@ -284,6 +304,8 @@ SOURCES = {
     'location_l_test': DataSource(location_l_train, location_l_test),
     'location_s_dev': DataSource(location_s_train, location_s_dev),
     'location_s_test': DataSource(location_s_train, location_s_test),
+    'annotations_s_dev': DataSource(annotations_s_train, annotations_s_dev),
+    'annotations_s_test': DataSource(annotations_s_train, annotations_s_test),
     'samples_ls_to_ll': DataSource(samples_ls_to_ll, location_l_dev),
     'samples_ll_to_ls': DataSource(samples_ll_to_ls, location_s_dev),
 }
