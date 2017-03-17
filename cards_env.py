@@ -76,7 +76,13 @@ class CardsEnv(gym.Env):
         rewards = []
         done = []
         for w, action in enumerate(actions):
-            old_value = self.game_config.value(self, w)
+            done_w = self._is_done(w)
+            if done_w:
+                rewards.append(0.0)
+                done.append(True)
+                continue
+
+            old_value = self.game_config.value(self, w, self.t)
 
             if action == 'nop':
                 pass
@@ -103,13 +109,11 @@ class CardsEnv(gym.Env):
 
             done_w = self._is_done(w)
             done.append(done_w)
-            if done_w:
-                rewards.append(0.0)
-            else:
-                new_value = self.game_config.value(self, w)
-                action_reward = self.game_config.action_reward(self, w, action)
-                rewards.append(new_value - old_value + action_reward)
+            new_value = self.game_config.value(self, w, self.t + 1)
+            action_reward = self.game_config.action_reward(self, w, action)
+            rewards.append(new_value - old_value + action_reward)
         #      obs, reward, done, info
+        self.t += 1
         return self._get_obs(), rewards, done, {}
 
     def _move(self, w, dr, dc):
@@ -166,6 +170,7 @@ class CardsEnv(gym.Env):
         self.p2_loc = [(0, 0) for _ in range(MAX_BATCH_SIZE)]
         self.loc_to_cards = [defaultdict(list) for _ in range(MAX_BATCH_SIZE)]
         self.cards_to_loc = [defaultdict(lambda: None) for _ in range(MAX_BATCH_SIZE)]
+        self.t = 0
 
     def _configure(self, worlds=None, verbosity=None):
         if verbosity is not None:

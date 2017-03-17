@@ -70,7 +70,7 @@ class CardsLearner(Learner):
                 observation, reward, done_step, info = env.step(action)
                 self.update_belief(env, prev_obs, action, observation, reward, done, info)
                 done = np.bitwise_or(done, done_step[:len(batch)])
-                total_reward += np.array(reward[:len(batch)]) * (1. - done)
+                total_reward += np.array(reward[:len(batch)])
                 if done.all():
                     break
 
