@@ -206,10 +206,9 @@ class KarpathyPGLearner(TensorflowLearner, CardsLearner):
         opt = tf.train.RMSPropOptimizer(learning_rate=0.1)
         logp = tf.neg(tf.nn.sparse_softmax_cross_entropy_with_logits(predict_op, action),
                       name='action_log_prob')
-        dlogp = tf.sub(1.0, tf.exp(logp), name='dlogp')
-        signal = tf.mul(dlogp, normalized * credit, name='signal')
+        signal = tf.mul(logp, normalized * credit, name='signal')
         signal_down = tf.reduce_sum(tf.slice(tf.reshape(signal, [-1, 10]),
-                                             [0, 1], [-1, 1]),
+                                             [0, 4], [-1, 1]),
                                     [0], name='signal_down')
         print_node = tf.Print(signal, [signal_down], message='signal_down: ', summarize=10)
         with tf.control_dependencies([print_node]):
@@ -417,8 +416,13 @@ class RLListenerLearner(KarpathyPGLearner):
                             num_outputs=len(cards_env.ACTIONS))
             with tf.variable_scope('fully_connected_1', reuse=True):
                 biases = tf.get_variable('biases')
-            print_node = tf.Print(predict_op, [biases], message='biases: ', summarize=10)
-            with tf.control_dependencies([print_node]):
+                biases_down = tf.slice(biases, [4], [1], name='biases_down')
+                predict_down = tf.slice(predict_op, [0, 4], [-1, 1], name='predict_down')
+            print_nodes = [
+                tf.Print(predict_op, [biases_down], message='biases_down: ', summarize=10),
+                tf.Print(predict_op, [predict_down], message='predict_down: ', summarize=10)
+            ]
+            with tf.control_dependencies(print_nodes):
                 predict_op = tf.identity(predict_op)
 
         return input_vars, predict_op
