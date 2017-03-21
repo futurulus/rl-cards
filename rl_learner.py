@@ -105,8 +105,8 @@ class TensorflowLearner(learner.Learner):
             feed_dict[self.dropout_keep_prob] = 1.0 - self.options.dropout
         results = self.session.run(ops, feed_dict=feed_dict)
         if self.summary_op is not None:
-          summary = results[1]
-          self.summary_writer.add_summary(summary, self.step)
+            summary = results[1]
+            self.summary_writer.add_summary(summary, self.step)
 
     def run_predict(self, feed_dict):
         if self.use_dropout:
