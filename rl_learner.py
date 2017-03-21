@@ -95,15 +95,18 @@ class TensorflowLearner(learner.Learner):
 
     def run_train(self, feed_dict):
         self.step += 1
-        ops = [self.train_op, self.summary_op]
+        ops = [self.train_op]
+        if self.summary_op is not None:
+            ops.append(self.summary_op)
         if self.options.detect_nans:
             ops.append(self.check_op)
         if self.use_dropout:
             feed_dict = dict(feed_dict)
             feed_dict[self.dropout_keep_prob] = 1.0 - self.options.dropout
         results = self.session.run(ops, feed_dict=feed_dict)
-        summary = results[1]
-        self.summary_writer.add_summary(summary, self.step)
+        if self.summary_op is not None:
+          summary = results[1]
+          self.summary_writer.add_summary(summary, self.step)
 
     def run_predict(self, feed_dict):
         if self.use_dropout:
