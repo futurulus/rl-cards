@@ -28,8 +28,6 @@ parser.add_argument('--unk_threshold', type=int, default=1,
                     help='Maximum number of occurrences for a token to occur in training '
                          'and still be counted as an unknown word (<unk>).')
 
-parser.add_argument('--learning_rate', type=float, default=0.1,
-                    help='The learning rate for neural sequence model training.')
 parser.add_argument('--embedding_size', type=int, default=128,
                     help='The dimensionality of word embeddings in neural sequence models.')
 parser.add_argument('--num_rnn_units', type=int, default=128,

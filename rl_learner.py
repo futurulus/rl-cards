@@ -30,6 +30,8 @@ parser.add_argument('--pg_train_epochs', type=int, default=1,
                     help='Number of times to pass through the data in training.')
 parser.add_argument('--pg_normalize', type=config.boolean, default=True,
                     help='If True, apply batch normalization to total rewards to reduce gradients.')
+parser.add_argument('--learning_rate', type=float, default=0.1,
+                    help='The learning rate for neural sequence model training.')
 parser.add_argument('--dropout', type=float, default=0.5,
                     help='Fraction of dimensions to drop in dropout (1 - keep_prob). '
                          'Use 0.0 to disable.')
@@ -206,16 +208,17 @@ class KarpathyPGLearner(TensorflowLearner, CardsLearner):
                                                    scale=1.0, offset=0.0, variance_epsilon=1e-4)
         else:
             normalized = reward
-        opt = tf.train.RMSPropOptimizer(learning_rate=0.1)
+        opt = tf.train.RMSPropOptimizer(learning_rate=self.options.learning_rate)
         logp = tf.neg(tf.nn.sparse_softmax_cross_entropy_with_logits(predict_op, action),
                       name='action_log_prob')
         signal = tf.mul(logp, normalized * credit, name='signal')
         signal_down = tf.reduce_sum(tf.slice(tf.reshape(signal, [-1, 10]),
                                              [0, 4], [-1, 1]),
                                     [0], name='signal_down')
-        print_node = tf.Print(signal, [signal_down], message='signal_down: ', summarize=10)
-        with tf.control_dependencies([print_node]):
-            signal = tf.identity(signal)
+        if self.options.verbosity >= 5:
+            print_node = tf.Print(signal, [signal_down], message='signal_down: ', summarize=10)
+            with tf.control_dependencies([print_node]):
+                signal = tf.identity(signal)
         loss = tf.reduce_mean(-signal, name='loss')
         var_list = tf.trainable_variables()
         print('Trainable variables:')
@@ -250,11 +253,12 @@ class KarpathyPGLearner(TensorflowLearner, CardsLearner):
                          num_outputs=self.options.pg_hidden_size)
             predict_op = fc(hidden1, trainable=True, activation_fn=tf.identity,
                             num_outputs=len(cards_env.ACTIONS))
-            with tf.variable_scope('fully_connected_1', reuse=True):
-                biases = tf.get_variable('biases')
-            print_node = tf.Print(predict_op, [biases], message='biases: ', summarize=10)
-            with tf.control_dependencies([print_node]):
-                predict_op = tf.identity(predict_op)
+            if self.options.verbosity >= 5:
+                with tf.variable_scope('fully_connected_1', reuse=True):
+                    biases = tf.get_variable('biases')
+                print_node = tf.Print(predict_op, [biases], message='biases: ', summarize=10)
+                with tf.control_dependencies([print_node]):
+                    predict_op = tf.identity(predict_op)
 
         return input_vars, predict_op
 
@@ -417,16 +421,17 @@ class RLListenerLearner(KarpathyPGLearner):
                          num_outputs=self.options.pg_hidden_size)
             predict_op = fc(hidden1, trainable=True, activation_fn=tf.identity,
                             num_outputs=len(cards_env.ACTIONS))
-            with tf.variable_scope('fully_connected_1', reuse=True):
-                biases = tf.get_variable('biases')
-                biases_down = tf.slice(biases, [4], [1], name='biases_down')
-                predict_down = tf.slice(predict_op, [0, 4], [-1, 1], name='predict_down')
-            print_nodes = [
-                tf.Print(predict_op, [biases_down], message='biases_down: ', summarize=10),
-                tf.Print(predict_op, [predict_down], message='predict_down: ', summarize=10)
-            ]
-            with tf.control_dependencies(print_nodes):
-                predict_op = tf.identity(predict_op)
+            if self.options.verbosity >= 5:
+                with tf.variable_scope('fully_connected_1', reuse=True):
+                    biases = tf.get_variable('biases')
+                    biases_down = tf.slice(biases, [4], [1], name='biases_down')
+                    predict_down = tf.slice(predict_op, [0, 4], [-1, 1], name='predict_down')
+                print_nodes = [
+                    tf.Print(predict_op, [biases_down], message='biases_down: ', summarize=10),
+                    tf.Print(predict_op, [predict_down], message='predict_down: ', summarize=10)
+                ]
+                with tf.control_dependencies(print_nodes):
+                    predict_op = tf.identity(predict_op)
 
         return input_vars, predict_op
 
