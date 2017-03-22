@@ -537,13 +537,12 @@ class LocationSpeaker(ReflexListener):
         # Inputs
         maxlen = self.seq_vec.max_len
         p2_loc = tf.placeholder(tf.int32, shape=(None,), name='p2_loc')
-        input_vars = [p2_loc]
+        walls = tf.placeholder(tf.float32, shape=(None,) + cards_env.MAX_BOARD_SIZE,
+                               name='walls')
+        input_vars = [p2_loc, walls]
 
         # Hidden layers
-        loc_embeddings = tf.Variable(tf.random_uniform([NUM_LOCS, self.options.num_rnn_units],
-                                                       -1.0, 1.0),
-                                     name='loc_embeddings')
-        loc_embed = tf.nn.embedding_lookup(loc_embeddings, p2_loc, name='loc_embed')
+        loc_embed = self.input_to_loc_repr(input_vars)
         loc_embed_drop = tf.nn.dropout(loc_embed, keep_prob=self.dropout_keep_prob,
                                        name='loc_embed_drop')
 
@@ -640,12 +639,20 @@ class LocationSpeaker(ReflexListener):
     def state_to_linear_dist(self, encoder_state):
         assert False, "This shouldn't be called"
 
+    def input_to_loc_repr(self, inputs):
+        p2_loc, walls = inputs
+        loc_embeddings = tf.Variable(tf.random_uniform([NUM_LOCS, self.options.num_rnn_units],
+                                                       -1.0, 1.0),
+                                     name='loc_embeddings')
+        return tf.nn.embedding_lookup(loc_embeddings, p2_loc, name='loc_embed')
+
     def vectorize_inputs(self, batch):
         loc = np.array([
             coord_to_loc_index(inst.input['loc'])
             for inst in batch
         ])
-        return dict(zip(self.input_vars, [loc]))
+        walls = np.array([inst.input['walls'] for inst in batch])
+        return dict(zip(self.input_vars, [loc, walls]))
 
     def vectorize_labels(self, batch):
         utt = self.seq_vec.vectorize_all([inst.output for inst in batch])
@@ -672,6 +679,31 @@ class LocationSpeaker(ReflexListener):
     def output_to_scores(self, output, labels):
         scores, _, _ = output
         return [float(s) for s in scores]
+
+
+class SmoothedLocationSpeaker(LocationSpeaker):
+    def input_to_loc_repr(self, inputs):
+        p2_loc, walls = inputs
+        p2_loc_onehot_2d = tf.reshape(tf.one_hot(p2_loc, depth=NUM_LOCS),
+                                      (-1,) + cards_env.MAX_BOARD_SIZE + (1,), name='p2_loc_onehot')
+        walls_mask = tf.maximum(tf.expand_dims(1.0 - walls, 3), 0.0, name='walls_mask')
+        smoothing_filter = tf.constant(
+            np.array([[0.000, 0.125, 0.000],
+                      [0.125, 0.500, 0.125],
+                      [0.000, 0.125, 0.000]])[:, :, np.newaxis, np.newaxis],
+            dtype=tf.float32
+        )
+        smoothed1 = tf.nn.conv2d(p2_loc_onehot_2d, smoothing_filter,
+                                 [1, 1, 1, 1], padding="SAME", name='smoothed1')
+        masked1 = tf.mul(smoothed1, walls_mask, name='masked1')
+        smoothed2 = tf.nn.conv2d(masked1, smoothing_filter,
+                                 [1, 1, 1, 1], padding="SAME")
+        masked2 = tf.mul(smoothed2,  walls_mask, name='masked1')
+        masked_linear = tf.reshape(masked2, [-1, NUM_LOCS])
+        loc_embeddings = tf.Variable(tf.random_uniform([NUM_LOCS, self.options.num_rnn_units],
+                                                       -1.0, 1.0),
+                                     name='loc_embeddings')
+        return tf.matmul(masked_linear, loc_embeddings, name='smoothed_embed')
 
 
 def loc_index_to_coord(idx, card=False):

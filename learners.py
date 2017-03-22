@@ -1,7 +1,7 @@
 from baseline import RandomLearner, SearcherLearner, OracleLearner
 from rl_learner import KarpathyPGLearner, RLListenerLearner
 from reflex import UniformListener, ReflexListener, FactoredReflexListener
-from reflex import LocationListener, LocationSpeaker
+from reflex import LocationListener, LocationSpeaker, SmoothedLocationSpeaker
 
 
 def new(key):
@@ -24,4 +24,5 @@ LEARNERS = {
     'Location': LocationListener,
     'LocationL': LocationListener,
     'LocationS': LocationSpeaker,
+    'SmoothedLocationS': SmoothedLocationSpeaker,
 }
