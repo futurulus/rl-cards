@@ -5,8 +5,9 @@ import tensorflow as tf
 s2s = tf.nn.seq2seq
 
 from stanza.monitoring import progress
-from stanza.research import config, iterators
+from stanza.research import config, iterators, instance
 from stanza.research.learner import Learner
+from stanza.research.rng import get_rng
 
 import cards_env
 import tfutils
@@ -35,6 +36,7 @@ parser.add_argument('--num_rnn_units', type=int, default=128,
 
 
 NUM_LOCS = np.prod(cards_env.MAX_BOARD_SIZE)
+rng = get_rng()
 
 
 def trace_nans(op, session, feed_dict, indent=0, seen=None):
@@ -535,7 +537,6 @@ class LocationListener(ReflexListener):
 class LocationSpeaker(ReflexListener):
     def get_layers(self):
         # Inputs
-        maxlen = self.seq_vec.max_len
         p2_loc = tf.placeholder(tf.int32, shape=(None,), name='p2_loc')
         walls = tf.placeholder(tf.float32, shape=(None,) + cards_env.MAX_BOARD_SIZE,
                                name='walls')
@@ -546,26 +547,57 @@ class LocationSpeaker(ReflexListener):
         loc_embed_drop = tf.nn.dropout(loc_embed, keep_prob=self.dropout_keep_prob,
                                        name='loc_embed_drop')
 
+        # Labels
+        true_utt = tf.placeholder(tf.int32, shape=(None, self.seq_vec.max_len),
+                                  name='true_utt')
+        true_utt_len = tf.placeholder(tf.int32, shape=(None,), name='true_utt_len')
+
+        label_vars = [true_utt, true_utt_len] + self.additional_label_vars()
+
+        # Decoder
+        (next_word_logits,
+         true_next_word,
+         true_utt_len_clipped,
+         predictions, samples,
+         decoder_scope) = self.rnn_decoder(true_utt, true_utt_len,
+                                           initial_state=(loc_embed_drop, loc_embed_drop))
+
+        # Loss function
+        scores = self.sequence_scores(next_word_logits, true_next_word, true_utt_len_clipped)
+
+        predict_op = (-scores, predictions, samples)
+        loss = self.loss_fn(scores, decoder_scope, label_vars,
+                            initial_state=(loc_embed_drop, loc_embed_drop))
+
+        # Optimizer
+        opt = tf.train.RMSPropOptimizer(learning_rate=self.options.learning_rate)
+        var_list = tf.trainable_variables()
+        if self.options.verbosity >= 4:
+            print('Trainable variables:')
+            for var in var_list:
+                print(var.name)
+        train_op = tfutils.minimize_with_grad_clip(opt, self.options.pg_grad_clip,
+                                                   loss, var_list=var_list)
+
+        return input_vars, label_vars, train_op, predict_op
+
+    def additional_label_vars(self):
+        return []
+
+    def rnn_decoder(self, true_utt, true_utt_len, initial_state, reuse=False):
         cell = tf.contrib.rnn.LSTMBlockCell(num_units=self.options.num_rnn_units,
                                             use_peephole=False)
 
-        # Labels
-        true_utt = tf.placeholder(tf.int32, shape=(None, maxlen),
-                                  name='true_utt')
-        true_utt_len = tf.placeholder(tf.int32, shape=(None,), name='true_utt_len')
         reduced_size = tf.minimum(tf.shape(true_utt)[1], tf.reduce_max(true_utt_len),
                                   name='reduced_size')
-        true_utt_reduced = tf.slice(true_utt, [0, 0], [-1, reduced_size])
         true_utt_len_clipped = tf.minimum(reduced_size, true_utt_len, name='true_utt_len_clipped')
-
+        true_utt_reduced = tf.slice(true_utt, [0, 0], [-1, reduced_size])
         utt_prev = tf.slice(true_utt_reduced, [0, 0], [-1, tf.shape(true_utt_reduced)[1] - 1])
         utt_next = tf.slice(true_utt_reduced, [0, 1], [-1, -1])
 
-        label_vars = [true_utt, true_utt_len]
-
         # Decoder
         fc = tf.contrib.layers.fully_connected
-        with tf.variable_scope('decoder') as varscope:
+        with tf.variable_scope('decoder', reuse=reuse) as varscope:
             embeddings = tf.Variable(tf.random_uniform([self.seq_vec.num_types,
                                                         self.options.embedding_size], -1.0, 1.0),
                                      name='embedding')
@@ -581,13 +613,13 @@ class LocationSpeaker(ReflexListener):
                                            name='utt_embed_drop')
             outputs, _ = tf.nn.dynamic_rnn(cell, utt_embed_drop,
                                            sequence_length=true_utt_len_clipped,
-                                           initial_state=(loc_embed_drop, loc_embed_drop),
+                                           initial_state=initial_state,
                                            dtype=tf.float32, scope=varscope)
             next_word_logits = output_fn(outputs)
 
             varscope.reuse_variables()
             decoder_args = [
-                output_fn, (loc_embed_drop, loc_embed_drop), embeddings,
+                output_fn, initial_state, embeddings,
                 self.seq_vec.token_indices['<s>'], self.seq_vec.token_indices['</s>'],
                 self.seq_vec.max_len, self.options.num_rnn_units,
             ]
@@ -604,32 +636,25 @@ class LocationSpeaker(ReflexListener):
                                                      decoder_fn=decoder_sample,
                                                      scope=varscope)
 
+        return (next_word_logits, utt_next, true_utt_len_clipped,
+                predictions, samples, varscope)
+
+    def sequence_scores(self, next_word_logits, true_next_word, true_utt_len_clipped):
         # Scoring
         # http://r2rt.com/recurrent-neural-networks-in-tensorflow-iii-variable-length-sequences.html
+        maxlen = self.seq_vec.max_len
         lower_triangular_ones = tf.constant(np.tril(np.ones([maxlen, maxlen]), -1),
                                             dtype=tf.float32)
         seqlen_mask = tf.slice(tf.gather(lower_triangular_ones, true_utt_len_clipped - 1),
-                               [0, 0], [-1, tf.shape(utt_next)[1]])
+                               [0, 0], [-1, tf.shape(true_next_word)[1]])
 
         xent = tf.nn.sparse_softmax_cross_entropy_with_logits
-        per_token_loss = xent(next_word_logits, utt_next, name='per_token_loss')
+        per_token_loss = xent(next_word_logits, true_next_word, name='per_token_loss')
         scores = tf.reduce_sum(per_token_loss * seqlen_mask, 1, name='scores')
-        predict_op = (-scores, predictions, samples)
+        return scores
 
-        # Loss function
-        loss = tf.reduce_mean(scores, name='sequence_loss')
-
-        # Optimizer
-        opt = tf.train.RMSPropOptimizer(learning_rate=self.options.learning_rate)
-        var_list = tf.trainable_variables()
-        if self.options.verbosity >= 4:
-            print('Trainable variables:')
-            for var in var_list:
-                print(var.name)
-        train_op = tfutils.minimize_with_grad_clip(opt, self.options.pg_grad_clip,
-                                                   loss, var_list=var_list)
-
-        return input_vars, label_vars, train_op, predict_op
+    def loss_fn(self, scores, decoder_scope, label_vars, initial_state):
+        return tf.reduce_mean(scores, name='sequence_loss')
 
     def init_vectorizers(self, training_instances):
         unk_threshold = self.options.unk_threshold
@@ -704,6 +729,46 @@ class SmoothedLocationSpeaker(LocationSpeaker):
                                                        -1.0, 1.0),
                                      name='loc_embeddings')
         return tf.matmul(masked_linear, loc_embeddings, name='smoothed_embed')
+
+
+class ContrastiveSmoothedLocationSpeaker(SmoothedLocationSpeaker):
+    def additional_label_vars(self):
+        contrast_utt = tf.placeholder(tf.int32, shape=(None, self.seq_vec.max_len),
+                                      name='contrast_utt')
+        contrast_utt_len = tf.placeholder(tf.int32, shape=(None,), name='contrast_utt_len')
+        return [contrast_utt, contrast_utt_len]
+
+    def loss_fn(self, scores, decoder_scope, label_vars, initial_state):
+        basic_loss = super(ContrastiveSmoothedLocationSpeaker, self).loss_fn(scores,
+                                                                             decoder_scope,
+                                                                             label_vars,
+                                                                             initial_state)
+        contrast_utt, contrast_utt_len = label_vars[2:4]
+
+        (next_word_logits,
+         contrast_next_word,
+         contrast_utt_len_clipped,
+         predictions, samples,
+         decoder_scope) = self.rnn_decoder(contrast_utt, contrast_utt_len,
+                                           initial_state=initial_state, reuse=True)
+
+        # Loss function
+        contrast_scores = self.sequence_scores(next_word_logits,
+                                               contrast_next_word, contrast_utt_len_clipped)
+
+        return basic_loss - 0.5 * tf.reduce_mean(contrast_scores, name='contrast_loss')
+
+    def vectorize_labels(self, batch):
+        utt, utt_len, contrast_utt, contrast_utt_len = self.label_vars[:4]
+        orig_vectorized = super(ContrastiveSmoothedLocationSpeaker,
+                                self).vectorize_labels(batch)
+        contrast_batch = [instance.Instance(inst.input, rng.choice(batch).output)
+                          for inst in batch]
+        contrast_vectorized = super(ContrastiveSmoothedLocationSpeaker,
+                                    self).vectorize_labels(contrast_batch)
+        orig_vectorized[contrast_utt] = contrast_vectorized[utt]
+        orig_vectorized[contrast_utt_len] = contrast_vectorized[utt_len]
+        return orig_vectorized
 
 
 def loc_index_to_coord(idx, card=False):
